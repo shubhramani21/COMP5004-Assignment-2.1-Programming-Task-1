@@ -94,3 +94,82 @@ def _is_trained(model):
     if getattr(model, "_is_fitted", True) is False:
         return False
     return getattr(_final_estimator(model), "root_", True) is not None
+
+
+class StreamTrainer:
+    """Train and evaluate a streaming model chunk by chunk.
+
+    Parameters
+    ----------
+    model : object
+        Estimator or Pipeline with ``partial_fit(X, y)`` and ``predict(X)``
+        (e.g. ``DecisionTreeClassifier`` or ``Pipeline([..., tree])``).
+    rolling_window : int or None, default=None
+        If set, also log accuracy over the last ``rolling_window`` scored
+        samples.
+    auc_pos_label : label or None, default=None
+        If set and the model has ``predict_proba``, log cumulative ROC AUC
+        for this positive class (binary problems).
+    track_memory : bool, default=True
+        Log an estimate of the model's memory footprint after each chunk.
+    verbose : bool, default=False
+        Print one line per processed chunk.
+
+    Attributes
+    ----------
+    history_ : list of dict
+        One entry per chunk. Keys: "chunk", "n_samples", "scored",
+        "chunk_accuracy", "cumulative_accuracy", "cumulative_f1_macro",
+        "rolling_accuracy", "cumulative_auc", "fit_time", "predict_time",
+        "retrained", "n_retrains", "buffer_count", "model_bytes".
+        Values that do not apply are NaN (or None for "retrained").
+    n_chunks_ : int
+    n_samples_seen_ : int
+    last_y_true_, last_y_pred_ : numpy.ndarray or None
+        Labels and predictions of the most recently scored chunk.
+
+    Notes
+    -----
+    ``process_chunk`` follows the test-then-train (prequential) protocol:
+    each chunk is predicted by the current model before the model learns
+    from it, so every score is on unseen data. Chunks that arrive before
+    the model's first training (e.g. while a tree fills its buffer) are
+    trained on but not scored.
+    """
+
+    def __init__(self, model, rolling_window=None, auc_pos_label=None,
+                 track_memory=True, verbose=False):
+        for method in ("partial_fit", "predict"):
+            if not callable(getattr(model, method, None)):
+                raise TypeError(f"model must provide a {method} method.")
+        if rolling_window is not None:
+            rolling_window = _validate_integer(
+                rolling_window, name="rolling_window", minimum=1)
+        if auc_pos_label is not None and not callable(
+                getattr(model, "predict_proba", None)):
+            raise TypeError("auc_pos_label needs a model with predict_proba.")
+
+        self.model = model
+        self.rolling_window = rolling_window
+        self.auc_pos_label = auc_pos_label
+        self.track_memory = bool(track_memory)
+        self.verbose = bool(verbose)
+        self.reset()
+
+    def reset(self):
+        """Clear the log and metrics (the model is not reset). Returns self."""
+        self.history_ = []
+        self.n_chunks_ = 0
+        self.n_samples_seen_ = 0
+        self.last_y_true_ = None
+        self.last_y_pred_ = None
+        self._accuracy = StreamingAccuracy()
+        self._f1 = StreamingF1(average="macro")
+        self._confusion = StreamingConfusionMatrix()
+        self._rolling = (None if self.rolling_window is None else
+                         RollingWindowMetric(StreamingAccuracy(),
+                                             self.rolling_window))
+        self._auc = (None if self.auc_pos_label is None else
+                     StreamingAUC(pos_label=self.auc_pos_label))
+        self._pending = None
+        return self

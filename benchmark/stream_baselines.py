@@ -26,3 +26,27 @@ def loop_tree_predict(tree, X):
                 node = node.right
         predictions.append(tree.classes_[int(np.argmax(node.value))])
     return np.asarray(predictions)
+
+
+def loop_welford(chunks):
+    """Running per-column mean and population std, one value at a time.
+
+    Classic single-sample Welford update; equivalent to
+    ``StandardScaler.partial_fit`` applied to every chunk (without NaN).
+    """
+    count = None
+    for chunk in chunks:
+        chunk = np.asarray(chunk, dtype=np.float64)
+        if count is None:
+            n_features = chunk.shape[1]
+            count = 0
+            mean = [0.0] * n_features
+            m2 = [0.0] * n_features
+        for row in chunk:
+            count += 1
+            for j in range(n_features):
+                delta = row[j] - mean[j]
+                mean[j] += delta / count
+                m2[j] += delta * (row[j] - mean[j])
+    std = [np.sqrt(value / count) for value in m2]
+    return np.asarray(mean), np.asarray(std)

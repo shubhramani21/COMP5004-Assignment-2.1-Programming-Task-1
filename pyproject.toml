@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Scientific computing toolkit using Python and NumPy"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24"]
+dependencies = ["numpy>=1.24", "matplotlib>=3.7"]
 
 [tool.setuptools.packages.find]
 where = ["."]

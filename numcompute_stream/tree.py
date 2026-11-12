@@ -32,7 +32,10 @@ def _proportions(counts):
     Empty nodes (zero total count) get all-zero proportions instead of
     NaN, so callers never divide by zero.
     """
-    raise NotImplementedError
+    counts = np.asarray(counts, dtype=np.float64)
+    totals = counts.sum(axis=-1, keepdims=True)
+    proportions = counts / np.maximum(totals, 1.0)
+    return proportions, totals[..., 0]
 
 
 def _gini(counts):

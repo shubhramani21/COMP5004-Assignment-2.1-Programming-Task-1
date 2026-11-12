@@ -142,5 +142,31 @@ class TestStreamTrainerLogging(unittest.TestCase):
         self.assertIsNone(entry["retrained"])
         self.assertTrue(np.isnan(trainer.get_metric("retrained")[0]))
 
+
+class TestStreamTrainerValidation(unittest.TestCase):
+    def test_model_must_support_streaming(self):
+        with self.assertRaises(TypeError):
+            StreamTrainer(StandardScaler())
+        with self.assertRaises(TypeError):
+            StreamTrainer(_NoRetrainModel(), auc_pos_label=1)
+        with self.assertRaises(ValueError):
+            StreamTrainer(_pipe(), rolling_window=0)
+
+    def test_bad_labels(self):
+        trainer = StreamTrainer(DecisionTreeClassifier(buffer_size=10))
+        X, y = _stream()[0]
+        trainer.fit_chunk(X, y)
+        with self.assertRaises(ValueError):
+            trainer.score_chunk(X, y.reshape(-1, 1))
+
+    def test_estimate_nbytes(self):
+        small = estimate_nbytes(np.zeros(10))
+        large = estimate_nbytes(np.zeros(1000))
+        self.assertGreaterEqual(large - small, 990 * 8)
+        shared = np.zeros(1000)
+        self.assertLess(estimate_nbytes([shared, shared]),
+                        2 * estimate_nbytes(shared))
+
+
 if __name__ == "__main__":
     unittest.main()

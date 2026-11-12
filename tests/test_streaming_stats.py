@@ -118,5 +118,48 @@ class TestStreamingHistogram(unittest.TestCase):
         with self.assertRaises(ValueError):
             StreamingHistogram(bins=2, range=(0, 1)).update([np.inf])
 
+
+class TestStreamingSummary(unittest.TestCase):
+    def test_matches_full_data(self):
+        rng = np.random.default_rng(4)
+        X = rng.normal(loc=[0, 50, -3], scale=[1, 10, 0.1], size=(2000, 3))
+        X[rng.random(X.shape) < 0.05] = np.nan
+        summary = StreamingSummary()
+        for chunk in _chunks(X, 128):
+            summary.update_stats(chunk)
+        result = summary.result()
+        assert_array_equal(result["count"], np.sum(~np.isnan(X), axis=0))
+        assert_allclose(result["mean"], np.nanmean(X, axis=0))
+        assert_allclose(result["var"], np.nanvar(X, axis=0))
+        assert_allclose(result["min"], np.nanmin(X, axis=0))
+        assert_allclose(result["max"], np.nanmax(X, axis=0))
+        self.assertEqual(result["quantiles"].shape, (3, 3))
+        assert_allclose(result["quantiles"][1], np.nanmedian(X, axis=0),
+                        atol=0.15)
+        self.assertEqual(summary.n_rows_, 2000)
+
+    def test_ddof_and_one_dimensional_chunks(self):
+        summary = StreamingSummary(quantiles=()).update_stats([1.0, 2.0])
+        summary.update_stats([3.0])
+        result = summary.result(ddof=1)
+        assert_allclose(result["var"], [1.0])
+        self.assertEqual(result["quantiles"].shape, (0, 1))
+
+    def test_column_without_values_is_nan(self):
+        result = StreamingSummary().update_stats([[1.0, np.nan]]).result()
+        self.assertEqual(result["mean"][0], 1.0)
+        self.assertTrue(np.isnan(result["mean"][1]))
+        self.assertTrue(np.isnan(result["min"][1]))
+
+    def test_errors_keep_state(self):
+        summary = StreamingSummary().update_stats([[1.0, 2.0]])
+        with self.assertRaises(ValueError):
+            summary.update_stats([[1.0, 2.0, 3.0]])
+        with self.assertRaises(ValueError):
+            summary.update_stats([[np.inf, 1.0]])
+        self.assertEqual(summary.n_rows_, 1)
+        with self.assertRaises(RuntimeError):
+            StreamingSummary().result()
+
 if __name__ == "__main__":
     unittest.main()

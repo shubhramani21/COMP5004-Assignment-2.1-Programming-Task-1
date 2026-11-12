@@ -57,7 +57,10 @@ def _gini(counts):
     >>> float(_gini([2, 2]))
     0.5
     """
-    raise NotImplementedError
+    proportions, totals = _proportions(counts)
+    impurity = 1.0 - np.sum(proportions ** 2, axis=-1)
+    # Empty nodes have all-zero proportions, which would give 1.0.
+    return np.where(totals > 0, impurity, 0.0)
 
 
 def _entropy(counts):

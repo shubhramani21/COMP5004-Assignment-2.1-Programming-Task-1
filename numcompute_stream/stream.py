@@ -174,6 +174,63 @@ class StreamTrainer:
         self._pending = None
         return self
 
+    # -- individual steps ---------------------------------------------------
+
+    def score_chunk(self, X, y):
+        """Predict a chunk with the current model and update the metrics.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_chunk, n_features)
+        y : array-like, shape (n_chunk,)
+
+        Returns
+        -------
+        dict
+            "scored" (False if the model is not trained yet),
+            "chunk_accuracy", the cumulative metrics and "predict_time".
+        """
+        y = np.asarray(y)
+        if y.ndim != 1:
+            raise ValueError("y must be 1D.")
+
+        if not _is_trained(self.model):
+            # Nothing to score with yet (e.g. tree buffer still filling).
+            return self._stage({"scored": False, "chunk_accuracy": np.nan,
+                                "predict_time": np.nan})
+
+        start = time.perf_counter()
+        y_pred = np.asarray(self.model.predict(X))
+        predict_time = time.perf_counter() - start
+
+        _validate_stream_labels(y, y_pred)
+        self._accuracy.update(y, y_pred)
+        self._f1.update(y, y_pred)
+        self._confusion.update(y, y_pred)
+        if self._rolling is not None:
+            self._rolling.update(y, y_pred)
+        if self._auc is not None:
+            self._auc.update(y, self._positive_scores(X))
+
+        self.last_y_true_ = y
+        self.last_y_pred_ = y_pred
+        chunk_accuracy = float(np.mean(y == y_pred)) if y.size else np.nan
+        return self._stage({"scored": True, "chunk_accuracy": chunk_accuracy,
+                            "predict_time": predict_time})
+
+    # -- helpers ------------------------------------------------------------
+
+    def _positive_scores(self, X):
+        """Probability of ``auc_pos_label`` for each row (0 if unseen)."""
+        proba = np.asarray(self.model.predict_proba(X))
+        classes = getattr(_final_estimator(self.model), "classes_", None)
+        if classes is None:
+            raise TypeError("AUC needs the model to expose classes_.")
+        match = np.flatnonzero(np.asarray(classes) == self.auc_pos_label)
+        if match.size == 0:
+            return np.zeros(proba.shape[0])
+        return proba[:, match[0]]
+
     def _stage(self, values):
         """Collect values for the log entry being built."""
         if self._pending is None:

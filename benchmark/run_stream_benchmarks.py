@@ -79,3 +79,38 @@ def make_stream_data(n_samples, n_features=5, drift_at=None, noise=0.05,
 def iter_chunks(X, y, chunk_size):
     for start in range(0, X.shape[0], chunk_size):
         yield X[start:start + chunk_size], y[start:start + chunk_size]
+
+
+# ---------------------------------------------------------------------------
+# Part A: loop vs vectorised
+# ---------------------------------------------------------------------------
+
+def _row(name, size, loop_result, vector_result):
+    loop_time = loop_result["median_seconds"]
+    vector_time = vector_result["median_seconds"]
+    return {
+        "component": name,
+        "size": size,
+        "loop_seconds": loop_time,
+        "vectorised_seconds": vector_time,
+        "speedup": loop_time / vector_time if vector_time > 0 else float("inf"),
+    }
+
+
+def bench_split_search(sizes, repeats):
+    """Best threshold on one feature: O(n^2) loop vs O(n log n) cumsum."""
+    rows = []
+    for n in sizes:
+        rng = np.random.default_rng(n)
+        x = rng.normal(size=n)
+        y = rng.integers(0, 3, n)
+        loop_answer = _best_split_feature_loop(x, y, 3, _gini)
+        fast_answer = _best_split_feature(x, y, 3, _gini)
+        assert_allclose(fast_answer[0], loop_answer[0])
+        assert fast_answer[1] == loop_answer[1]
+        rows.append(_row(
+            "split_search", n,
+            benchmark(_best_split_feature_loop, x, y, 3, _gini, repeats=repeats),
+            benchmark(_best_split_feature, x, y, 3, _gini, repeats=repeats),
+        ))
+    return rows

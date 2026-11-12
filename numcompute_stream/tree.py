@@ -629,7 +629,19 @@ class DecisionTreeClassifier:
         -------
         numpy.ndarray, shape (n_samples, n_classes)
         """
-        raise NotImplementedError
+        values = np.empty((X.shape[0], self._n_classes), dtype=np.float64)
+        stack = [(self.root_, np.arange(X.shape[0]))]
+        while stack:
+            node, indices = stack.pop()
+            if indices.size == 0:
+                continue
+            if node.is_leaf:
+                values[indices] = node.value
+                continue
+            goes_left = X[indices, node.feature] <= node.threshold
+            stack.append((node.left, indices[goes_left]))
+            stack.append((node.right, indices[~goes_left]))
+        return values
 
     def predict_proba(self, X):
         """Class probabilities for each sample.

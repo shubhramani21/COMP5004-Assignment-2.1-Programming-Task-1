@@ -522,7 +522,33 @@ class DecisionTreeClassifier:
         it has fewer than ``min_samples_split`` samples, it cannot give
         each child ``min_samples_leaf`` samples, or no valid split exists.
         """
-        raise NotImplementedError
+        counts = np.bincount(y_encoded, minlength=self._n_classes)
+        n_samples = y_encoded.shape[0]
+        node = _Node(
+            value=counts.astype(np.float64),
+            n_samples=int(n_samples),
+            impurity=float(self._impurity_fn(counts)),
+        )
+
+        if (np.count_nonzero(counts) <= 1
+                or (self.max_depth is not None and depth >= self.max_depth)
+                or n_samples < self.min_samples_split
+                or n_samples < 2 * self.min_samples_leaf):
+            return node
+
+        split = self._best_split(X, y_encoded, rng)
+        if split is None:
+            return node
+
+        feature, threshold = split
+        goes_left = X[:, feature] <= threshold
+        node.feature = feature
+        node.threshold = threshold
+        node.left = self._build(X[goes_left], y_encoded[goes_left],
+                                depth + 1, rng)
+        node.right = self._build(X[~goes_left], y_encoded[~goes_left],
+                                 depth + 1, rng)
+        return node
 
     def partial_fit(self, X_chunk, y_chunk):
         """Add a chunk to the buffer; retrain when the buffer is full.

@@ -102,3 +102,34 @@ def plot_metric_over_time(metric_values, title="Metric over time",
 
     legend = any(name is not None for name in series) or marks is not None
     return _finish(fig, ax, title, xlabel, ylabel, save_path, show, legend)
+
+
+def compare_models(metric1, metric2, labels=("Model 1", "Model 2"),
+                   title="Model comparison", ylabel="Value", xlabel="Chunk",
+                   ax=None, save_path=None, show=False, figsize=(8, 4)):
+    """Compare two models on the same streaming metric.
+
+    Typical use: cumulative accuracy of two trees with different
+    ``buffer_size`` values. The series may have different lengths.
+
+    Parameters
+    ----------
+    metric1, metric2 : array-like, shape (n_chunks,)
+    labels : sequence of two str
+
+    Returns
+    -------
+    (matplotlib.figure.Figure, matplotlib.axes.Axes)
+    """
+    labels = list(labels)
+    if len(labels) != 2 or not all(isinstance(l, str) for l in labels):
+        raise ValueError("labels must contain exactly two strings.")
+    first = _as_series(metric1, "metric1")
+    second = _as_series(metric2, "metric2")
+
+    fig, ax = _get_axes(ax, figsize)
+    ax.plot(np.arange(first.size), first, marker="o", markersize=3,
+            label=labels[0])
+    ax.plot(np.arange(second.size), second, marker="s", markersize=3,
+            label=labels[1])
+    return _finish(fig, ax, title, xlabel, ylabel, save_path, show, True)

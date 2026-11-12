@@ -158,7 +158,35 @@ def _best_split_feature_loop(x, y_encoded, n_classes, impurity_fn,
     candidate threshold with a Python loop, giving O(n^2) time. Used for
     correctness tests and the loop-vs-vectorised benchmark.
     """
-    raise NotImplementedError
+    n_samples = x.shape[0]
+    if n_samples < 2 * min_samples_leaf or n_samples < 2:
+        return None
+
+    x_sorted, y_sorted = _sorted_feature(x, y_encoded)
+
+    best_score = np.inf
+    best_index = None
+    for i in range(n_samples - 1):
+        if x_sorted[i] == x_sorted[i + 1]:
+            continue
+        n_left = i + 1
+        n_right = n_samples - n_left
+        if n_left < min_samples_leaf or n_right < min_samples_leaf:
+            continue
+
+        left_counts = np.bincount(y_sorted[:n_left], minlength=n_classes)
+        right_counts = np.bincount(y_sorted[n_left:], minlength=n_classes)
+        score = (n_left * impurity_fn(left_counts)
+                 + n_right * impurity_fn(right_counts)) / n_samples
+
+        if score < best_score:  # strict: keep the first (smallest) threshold
+            best_score = float(score)
+            best_index = i
+
+    if best_index is None:
+        return None
+    return best_score, _midpoint(x_sorted[best_index],
+                                 x_sorted[best_index + 1])
 
 
 # ---------------------------------------------------------------------------

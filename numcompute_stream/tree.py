@@ -442,7 +442,21 @@ class DecisionTreeClassifier:
 
     def _resolve_max_features(self, n_features):
         """Convert ``max_features`` into an int in ``[1, n_features]``."""
-        raise NotImplementedError
+        mf = self.max_features
+        if mf is None:
+            return n_features
+        if mf == "sqrt":
+            return max(1, int(np.sqrt(n_features)))
+        if mf == "log2":
+            return max(1, int(np.log2(n_features)))
+        if isinstance(mf, Integral):
+            if mf > n_features:
+                raise ValueError(
+                    f"max_features={mf} exceeds the number of features "
+                    f"({n_features})."
+                )
+            return int(mf)
+        return max(1, int(float(mf) * n_features))
 
     # -- training -----------------------------------------------------------
 

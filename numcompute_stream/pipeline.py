@@ -349,6 +349,16 @@ class Pipeline:
         self._require("predict_proba")
         return self._final_step.predict_proba(self._transform_intermediate(X))
 
+    def score(self, X, y):
+        """Transform X through intermediate steps and score against y.
+
+        Uses the final step's score method (accuracy for
+        DecisionTreeClassifier). Raises TypeError if it has none and
+        RuntimeError if the pipeline is unfitted.
+        """
+        self._require("score")
+        return self._final_step.score(self._transform_intermediate(X), y)
+
     def fit_transform(self, X, y=None):
         """Fit and transform X through every step.
 

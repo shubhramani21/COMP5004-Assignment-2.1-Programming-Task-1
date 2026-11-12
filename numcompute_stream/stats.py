@@ -985,3 +985,84 @@ def _validate_quantile_levels(q):
         raise ValueError("q must be between 0 and 1.")
     return levels
 
+
+class _P2Estimator:
+    """One P-squared quantile estimator (Jain and Chlamtac, 1985).
+
+    Keeps five markers: the minimum, the estimate of p/2, the estimate of
+    p, the estimate of (1+p)/2 and the maximum. Each new value moves the
+    marker positions; markers that drift from their ideal positions are
+    adjusted with a parabolic (or, if that fails, linear) formula.
+    Memory is O(1) regardless of the stream length.
+    """
+
+    def __init__(self, p):
+        self.p = float(p)
+        self.initial = []           # first five values
+        self.heights = None         # marker values q[0..4]
+        self.positions = None       # actual marker positions n[0..4]
+        self.desired = None         # desired marker positions
+        self.increments = [0.0, self.p / 2, self.p, (1 + self.p) / 2, 1.0]
+
+    def add(self, x):
+        if self.heights is None:
+            self.initial.append(x)
+            if len(self.initial) == 5:
+                self.heights = sorted(self.initial)
+                self.positions = [0, 1, 2, 3, 4]
+                p = self.p
+                self.desired = [0.0, 2 * p, 4 * p, 2 + 2 * p, 4.0]
+            return
+
+        q, n = self.heights, self.positions
+
+        # 1. Find the cell k with q[k] <= x < q[k+1]; extend the extremes.
+        if x < q[0]:
+            q[0] = x
+            k = 0
+        elif x >= q[4]:
+            q[4] = x
+            k = 3
+        else:
+            k = 0
+            while x >= q[k + 1]:
+                k += 1
+
+        # 2. Markers above the cell shift right; desired positions advance.
+        for i in range(k + 1, 5):
+            n[i] += 1
+        for i in range(5):
+            self.desired[i] += self.increments[i]
+
+        # 3. Move the three middle markers if they are off by >= 1.
+        for i in (1, 2, 3):
+            d = self.desired[i] - n[i]
+            if (d >= 1 and n[i + 1] - n[i] > 1) or \
+                    (d <= -1 and n[i - 1] - n[i] < -1):
+                step = 1 if d > 0 else -1
+                candidate = self._parabolic(i, step)
+                if q[i - 1] < candidate < q[i + 1]:
+                    q[i] = candidate
+                else:
+                    q[i] = self._linear(i, step)
+                n[i] += step
+
+    def _parabolic(self, i, d):
+        q, n = self.heights, self.positions
+        return q[i] + d / (n[i + 1] - n[i - 1]) * (
+            (n[i] - n[i - 1] + d) * (q[i + 1] - q[i]) / (n[i + 1] - n[i])
+            + (n[i + 1] - n[i] - d) * (q[i] - q[i - 1]) / (n[i] - n[i - 1])
+        )
+
+    def _linear(self, i, d):
+        q, n = self.heights, self.positions
+        return q[i] + d * (q[i + d] - q[i]) / (n[i + d] - n[i])
+
+    def estimate(self):
+        if self.heights is None:
+            if not self.initial:
+                return np.nan
+            # Fewer than five values: exact linear-interpolation quantile.
+            return float(np.quantile(self.initial, self.p))
+        return float(self.heights[2])
+

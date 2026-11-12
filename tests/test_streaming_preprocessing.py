@@ -64,5 +64,53 @@ class TestStreamingImputer(unittest.TestCase):
         imputer.partial_fit(np.empty((0, 2)))
         assert_array_equal(imputer.n_samples_seen_, [1, 1])
 
+
+class TestStreamingStandardScaler(unittest.TestCase):
+    def test_matches_full_fit(self):
+        X = _random_with_nans(1)
+        streamed = _stream(StandardScaler(), X, size=23)
+        full = StandardScaler().fit(X)
+        assert_allclose(streamed.mean_, full.mean_)
+        assert_allclose(streamed.scale_, full.scale_)
+        assert_allclose(streamed.mean_, np.nanmean(X, axis=0))
+        assert_allclose(streamed.scale_, np.nanstd(X, axis=0))
+
+    def test_chunk_size_does_not_matter(self):
+        X = _random_with_nans(2)
+        results = [_stream(StandardScaler(), X, size).mean_
+                   for size in (1, 7, 50, 300)]
+        for result in results[1:]:
+            assert_allclose(result, results[0])
+
+    def test_numerically_stable_with_large_offset(self):
+        # Naive sum-of-squares variance loses all precision here.
+        rng = np.random.default_rng(3)
+        X = 1e9 + rng.normal(size=(1000, 1))
+        scaler = _stream(StandardScaler(), X, size=100)
+        assert_allclose(scaler.scale_, np.std(X, axis=0), rtol=1e-6)
+
+    def test_zero_variance_chunks_and_columns(self):
+        scaler = StandardScaler()
+        scaler.partial_fit(np.full((5, 2), 3.0))
+        assert_array_equal(scaler.scale_, [1.0, 1.0])
+        assert_array_equal(scaler.transform([[3.0, 3.0]]), [[0.0, 0.0]])
+        scaler.partial_fit([[5.0, 3.0]])
+        self.assertGreater(scaler.scale_[0], 0)
+        self.assertEqual(scaler.scale_[1], 1.0)
+
+    def test_all_nan_chunk_column_keeps_state(self):
+        scaler = StandardScaler().partial_fit([[1.0, 1.0], [3.0, 5.0]])
+        scaler.partial_fit([[np.nan, 9.0]])
+        assert_allclose(scaler.mean_, [2.0, 5.0])
+        assert_array_equal(scaler.n_samples_seen_, [2, 3])
+
+    def test_errors(self):
+        scaler = StandardScaler().partial_fit([[1.0, 2.0]])
+        with self.assertRaises(ValueError):
+            scaler.partial_fit([[np.inf, 1.0]])
+        with self.assertRaises(ValueError):
+            scaler.partial_fit([[1.0]])
+        assert_array_equal(scaler.mean_, [1.0, 2.0])
+
 if __name__ == "__main__":
     unittest.main()

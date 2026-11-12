@@ -1144,3 +1144,145 @@ class StreamingQuantile:
                 out.append(next(estimates))
         return np.asarray(out, dtype=np.float64)
 
+
+class StreamingHistogram:
+    """Histogram accumulated over chunks, optionally over a sliding window.
+
+    Parameters
+    ----------
+    bins : int or 1D array-like, default=10
+        Number of equal-width bins, or explicit strictly increasing edges.
+    range : (float, float) or None, default=None
+        Bounds for integer ``bins``. If both ``bins`` is an int and
+        ``range`` is None, the edges are fixed from the first non-empty
+        chunk (constant chunks get a width-1 range around the value).
+    window : int or None, default=None
+        If set, only the last ``window`` chunks are counted (sliding
+        window). None counts every chunk since the last reset.
+
+    Attributes
+    ----------
+    edges_ : numpy.ndarray or None
+        Bin edges, fixed for the life of the histogram.
+    counts_ : numpy.ndarray of int64
+        Counts per bin over the current window.
+    n_below_, n_above_ : int
+        Values that fell outside the edges (not counted in any bin).
+
+    Notes
+    -----
+    Edges cannot change once counting starts, or older counts would no
+    longer line up. Values outside the edges are tallied in ``n_below_``
+    and ``n_above_`` so nothing is silently lost.
+    """
+
+    def __init__(self, bins=10, range=None, window=None):
+        self.bins = bins
+        self.range = range
+        self.window = (None if window is None else
+                       _validate_integer(window, name="window", minimum=1))
+        # Validate parameters early; fixed edges are known immediately.
+        self._fixed_edges = None
+        if range is not None or not isinstance(
+                bins, (int, np.integer, bool, np.bool_)):
+            self._fixed_edges = _histogram_edges(np.empty(0), bins, range)
+        elif not isinstance(bins, (bool, np.bool_)):
+            _validate_integer(bins, name="bins", minimum=1)
+        else:
+            raise TypeError("bins must be a positive integer or edge array.")
+        self.reset()
+
+    def reset(self):
+        """Clear all counts (and edges learned from data). Returns self."""
+        self.edges_ = self._fixed_edges
+        self._chunks = deque(maxlen=self.window)
+        self._total = None
+        return self
+
+    def update(self, values):
+        """Count a 1D chunk of values (NaN ignored). Returns self."""
+        array, _, _, nan_mask = _prepare_reduction(values, None, "omit")
+        if array.ndim != 1:
+            raise ValueError("values must be a 1D array.")
+        clean = array[~nan_mask]
+
+        if self.edges_ is None:
+            if clean.size == 0:
+                return self
+            self.edges_ = _histogram_edges(clean, self.bins, None)
+
+        counts, _ = histogram(clean, bins=self.edges_)
+        record = (counts.astype(np.int64),
+                  int(np.sum(clean < self.edges_[0])),
+                  int(np.sum(clean > self.edges_[-1])))
+
+        if self.window is None:
+            if self._total is None:
+                self._total = list(record)
+            else:
+                self._total[0] = self._total[0] + record[0]
+                self._total[1] += record[1]
+                self._total[2] += record[2]
+        else:
+            self._chunks.append(record)  # deque drops the oldest chunk
+        return self
+
+    def _totals(self):
+        if self.edges_ is None:
+            return np.zeros(0, dtype=np.int64), 0, 0
+        n_bins = self.edges_.size - 1
+        if self.window is None:
+            if self._total is None:
+                return np.zeros(n_bins, dtype=np.int64), 0, 0
+            return self._total[0].copy(), self._total[1], self._total[2]
+        if not self._chunks:
+            return np.zeros(n_bins, dtype=np.int64), 0, 0
+        counts = np.sum([c[0] for c in self._chunks], axis=0)
+        return (counts.astype(np.int64),
+                sum(c[1] for c in self._chunks),
+                sum(c[2] for c in self._chunks))
+
+    @property
+    def counts_(self):
+        return self._totals()[0]
+
+    @property
+    def n_below_(self):
+        return self._totals()[1]
+
+    @property
+    def n_above_(self):
+        return self._totals()[2]
+
+    def result(self):
+        """Return ``(counts, edges)`` like ``histogram``.
+
+        Raises
+        ------
+        RuntimeError
+            If edges are not known yet (no data and no fixed range).
+        """
+        if self.edges_ is None:
+            raise RuntimeError("StreamingHistogram has no data yet; "
+                               "call update() or give a range.")
+        return self.counts_, self.edges_.copy()
+
+    def quantile(self, q):
+        """Approximate quantiles by interpolating inside the bins.
+
+        Uses only the values inside the edges. Accuracy is limited by the
+        bin width. Returns NaN when no values are inside the edges.
+        """
+        levels = _validate_quantile_levels(q)
+        counts, edges = self.result()
+        total = counts.sum()
+        if total == 0:
+            return np.full(levels.shape, np.nan)
+        cumulative = np.concatenate(([0], np.cumsum(counts)))
+        target = levels * total
+        index = np.clip(np.searchsorted(cumulative, target, side="right") - 1,
+                        0, counts.size - 1)
+        fraction = (target - cumulative[index]) / np.maximum(counts[index], 1)
+        fraction = np.clip(fraction, 0.0, 1.0)
+        return edges[index] + fraction * (edges[index + 1] - edges[index])
+

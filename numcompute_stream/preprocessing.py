@@ -1,4 +1,9 @@
-"""Tabular preprocessing with explicit fitted state and independent outputs."""
+"""Tabular preprocessing with explicit fitted state and independent outputs.
+
+Every transformer supports streaming: ``partial_fit(X_chunk)`` updates the
+learned state with one chunk, while ``fit(X)`` forgets previous state and
+learns from ``X`` alone.
+"""
 
 from numbers import Real
 import numpy as np
@@ -6,15 +11,19 @@ from .utils import _as_float_array
 
 
 class SimpleImputer:
-    """Replace numeric NaN cells with a finite constant.
-    
+    """Replace numeric NaN cells with a constant or a running column mean.
+
         Parameters
         ----------
-        strategy : str, default='constant'
-            Only 'constant' is supported in the baseline.
+        strategy : {'constant', 'mean'}, default='constant'
+            'constant' fills with fill_value. 'mean' fills with the mean of
+            the finite values seen so far in each column; the mean is
+            updated chunk by chunk with partial_fit.
         fill_value : real numeric scalar, default=0.0
             Must be finite and representable as float64. Booleans are rejected.
-    
+            With strategy='mean' it is used for columns that have no
+            finite value yet.
+
         Attributes
         ----------
         n_features_in_ : int
@@ -22,7 +31,11 @@ class SimpleImputer:
         fill_value_ : float
             Validated constant recorded by the last successful fit. Changes to
             constructor parameters take effect on the next fit.
-    
+        statistics_ : numpy.ndarray, shape (n_features_in_,)
+            Value used to fill each column.
+        n_samples_seen_ : numpy.ndarray of int64, shape (n_features_in_,)
+            Number of finite values seen per column.
+
         Notes
         -----
         Inputs must be 2D real numeric data, converted to independent float64
@@ -44,8 +57,8 @@ class SimpleImputer:
     def _validated_fill_value(self):
         if not isinstance(self.strategy, str):
             raise TypeError('strategy must be a string.')
-        if self.strategy != 'constant':
-            raise ValueError("Only strategy='constant' is supported.")
+        if self.strategy not in ('constant', 'mean'):
+            raise ValueError("strategy must be 'constant' or 'mean'.")
         if isinstance(self.fill_value, (bool, np.bool_)) or not isinstance(
                 self.fill_value, Real):
             raise TypeError('fill_value must be a real numeric scalar.')
@@ -59,25 +72,76 @@ class SimpleImputer:
         return value
 
     def fit(self, X, y=None):
-        """Record feature count and fill constant; return self."""
+        """Forget previous state and learn from X; return self."""
         fill = self._validated_fill_value()
         array = _as_float_array(X, name='X', ndim=2)
         if array.shape[0] == 0 or array.shape[1] == 0:
             raise ValueError('fit requires at least one sample and one feature.')
-        self.n_features_in_ = array.shape[1]
-        self.fill_value_ = fill
+        zeros = np.zeros(array.shape[1])
+        self._update(array, fill, zeros, zeros.astype(np.int64))
         return self
 
+    def partial_fit(self, X, y=None):
+        """Update the running column means with one chunk; return self.
+
+        X: 2D real numeric chunk of shape (n_chunk, n_features). Zero rows
+        are allowed. The column count must match earlier chunks. A failed
+        call leaves the previous state unchanged.
+        """
+        fill = self._validated_fill_value()
+        array = _as_float_array(X, name='X', ndim=2)
+        if array.shape[1] == 0:
+            raise ValueError('X must have at least one feature.')
+        if hasattr(self, 'n_features_in_'):
+            if array.shape[1] != self.n_features_in_:
+                raise ValueError(
+                    f'X must have {self.n_features_in_} features; '
+                    f'got {array.shape[1]}.')
+            mean, count = self._mean, self.n_samples_seen_
+        else:
+            mean = np.zeros(array.shape[1])
+            count = np.zeros(array.shape[1], dtype=np.int64)
+        self._update(array, fill, mean, count)
+        return self
+
+    def _update(self, array, fill, mean, count):
+        """Merge the chunk's finite values into the running mean and commit."""
+        finite = np.isfinite(array)
+        chunk_count = finite.sum(axis=0)
+        chunk_sum = np.where(finite, array, 0.0).sum(axis=0)
+        total = count + chunk_count
+        # Incremental mean: shift the old mean towards the chunk values.
+        # Using the difference (not a growing sum) keeps values small.
+        with np.errstate(over='ignore', invalid='ignore'):
+            new_mean = mean + (chunk_sum - chunk_count * mean) / np.maximum(total, 1)
+        if not np.all(np.isfinite(new_mean)):
+            raise ValueError('Column means exceed the supported numeric range.')
+
+        self.n_features_in_ = array.shape[1]
+        self.fill_value_ = fill
+        self.strategy_ = self.strategy
+        self.n_samples_seen_ = total
+        self._mean = new_mean
+
+    @property
+    def statistics_(self):
+        """Fill value for each column."""
+        if not hasattr(self, 'n_features_in_'):
+            raise AttributeError('statistics_ is available after fitting.')
+        constant = np.full(self.n_features_in_, self.fill_value_)
+        if self.strategy_ == 'constant':
+            return constant
+        return np.where(self.n_samples_seen_ > 0, self._mean, constant)
+
     def transform(self, X):
-        """Return a new float64 array with NaN replaced by fitted fill_value_."""
+        """Return a new float64 array with NaN replaced by statistics_."""
         if not hasattr(self, 'n_features_in_'):
             raise RuntimeError('SimpleImputer must be fitted before transform.')
         array = _as_float_array(X, name='X', ndim=2)
         if array.shape[1] != self.n_features_in_:
             raise ValueError(
                 f'X must have {self.n_features_in_} features; got {array.shape[1]}.')
-        array[np.isnan(array)] = self.fill_value_
-        return array
+        return np.where(np.isnan(array), self.statistics_, array)
 
     def fit_transform(self, X, y=None):
         """Fit on X, then return its transformed independent float64 copy."""

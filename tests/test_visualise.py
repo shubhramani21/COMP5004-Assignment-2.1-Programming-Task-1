@@ -70,5 +70,30 @@ class TestCompareModels(_CloseFigures):
         with self.assertRaises(ValueError):
             compare_models([1], [2], labels=["a", 2])
 
+
+class TestPredictionsVsGroundTruth(_CloseFigures):
+    def test_marks_wrong_predictions(self):
+        _, ax = plot_predictions_vs_ground_truth([0, 1, 1, 0], [0, 1, 0, 0])
+        self.assertIn("75.0%", ax.get_title())
+        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        self.assertIn("wrong prediction", labels)
+        wrong = ax.collections[2].get_offsets()
+        assert_array_equal(wrong, [[2, 0]])
+
+    def test_string_labels_and_all_correct(self):
+        _, ax = plot_predictions_vs_ground_truth(["cat", "dog"], ["cat", "dog"])
+        self.assertEqual([t.get_text() for t in ax.get_yticklabels()],
+                         ["cat", "dog"])
+        self.assertEqual(len(ax.collections), 2)  # no "wrong" scatter
+        self.assertIn("100.0%", ax.get_title())
+
+    def test_invalid_inputs(self):
+        with self.assertRaises(ValueError):
+            plot_predictions_vs_ground_truth([0, 1], [0])
+        with self.assertRaises(ValueError):
+            plot_predictions_vs_ground_truth([], [])
+        with self.assertRaises(TypeError):
+            plot_predictions_vs_ground_truth([0, 1], ["a", "b"])
+
 if __name__ == "__main__":
     unittest.main()

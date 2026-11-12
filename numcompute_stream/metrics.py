@@ -989,3 +989,64 @@ class StreamingAUC(StreamingMetric):
         neg_below = np.cumsum(self._neg) - self._neg
         wins = np.sum(self._pos * (neg_below + 0.5 * self._neg))
         return float(wins / (n_pos * n_neg))
+
+
+class RollingWindowMetric:
+    """Evaluate any streaming metric on only the last ``window_size`` samples.
+
+    Parameters
+    ----------
+    metric : StreamingMetric
+        Template metric, e.g. ``StreamingF1(average="macro")``. It is
+        copied, never modified.
+    window_size : int
+        Number of most recent samples to keep.
+
+    Examples
+    --------
+    >>> rolling = RollingWindowMetric(StreamingAccuracy(), window_size=2)
+    >>> rolling.update([0, 0], [1, 1]).update([1, 1], [1, 1]).result()
+    1.0
+    """
+
+    def __init__(self, metric, window_size):
+        if not isinstance(metric, StreamingMetric):
+            raise TypeError("metric must be a StreamingMetric instance.")
+        self.metric = metric
+        self.window_size = _validate_integer(window_size,
+                                             name="window_size", minimum=1)
+        self.reset()
+
+    def _fresh_metric(self):
+        return copy.deepcopy(self.metric).reset()
+
+    def reset(self):
+        """Empty the window. Returns self."""
+        self._true = None
+        self._pred = None
+        return self
+
+    @property
+    def n_samples_(self):
+        """Number of samples currently in the window."""
+        return 0 if self._true is None else int(self._true.shape[0])
+
+    def update(self, y_true, y_pred):
+        """Add a chunk and drop samples that fall out of the window."""
+        # Validate the chunk with a throwaway metric before storing it.
+        self._fresh_metric().update(y_true, y_pred)
+        true = np.asarray(y_true)
+        pred = np.asarray(y_pred)
+        if self._true is not None:
+            true = np.concatenate((self._true, true))
+            pred = np.concatenate((self._pred, pred))
+        self._true = true[-self.window_size:]
+        self._pred = pred[-self.window_size:]
+        return self
+
+    def result(self):
+        """Metric over the samples currently in the window."""
+        if self.n_samples_ == 0:
+            raise RuntimeError("RollingWindowMetric has no data; "
+                               "call update() first.")
+        return self._fresh_metric().update(self._true, self._pred).result()

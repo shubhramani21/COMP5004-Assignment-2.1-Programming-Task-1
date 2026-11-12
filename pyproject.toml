@@ -12,4 +12,4 @@ dependencies = ["numpy>=1.24"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["numcompute*"]
+include = ["numcompute*", "numcompute_stream*"]

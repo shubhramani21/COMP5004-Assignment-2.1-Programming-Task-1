@@ -95,5 +95,23 @@ class TestPredictionsVsGroundTruth(_CloseFigures):
         with self.assertRaises(TypeError):
             plot_predictions_vs_ground_truth([0, 1], ["a", "b"])
 
+
+class TestConfusionAndSaving(_CloseFigures):
+    def test_confusion_matrix_counts_drawn(self):
+        _, ax = plot_confusion_matrix([[5, 1], [2, 7]], labels=[0, 1])
+        texts = sorted(text.get_text() for text in ax.texts)
+        self.assertEqual(texts, ["1", "2", "5", "7"])
+        with self.assertRaises(ValueError):
+            plot_confusion_matrix([[1, 2]], labels=[0])
+
+    def test_save_to_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "accuracy.png")
+            plot_metric_over_time([0.1, 0.2], save_path=path)
+            self.assertGreater(os.path.getsize(path), 0)
+        with self.assertRaises(TypeError):
+            plot_metric_over_time([0.1], save_path=123)
+
+
 if __name__ == "__main__":
     unittest.main()

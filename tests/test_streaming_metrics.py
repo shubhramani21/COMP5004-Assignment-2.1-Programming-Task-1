@@ -85,5 +85,75 @@ class TestStreamingConfusionMatrix(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             cm.result()
 
+
+class TestStreamingScores(unittest.TestCase):
+    def setUp(self):
+        rng = np.random.default_rng(1)
+        self.y_true = rng.integers(0, 3, 400)
+        self.y_pred = np.where(rng.random(400) < 0.7, self.y_true,
+                               rng.integers(0, 3, 400))
+
+    def _stream(self, metric, size=33):
+        for t, p in _chunks(self.y_true, self.y_pred, size=size):
+            metric.update(t, p)
+        return metric.result()
+
+    def test_accuracy_matches_batch(self):
+        assert_allclose(self._stream(StreamingAccuracy()),
+                        accuracy(self.y_true, self.y_pred))
+
+    def test_averaged_metrics_match_batch(self):
+        pairs = [(StreamingPrecision, precision),
+                 (StreamingRecall, recall),
+                 (StreamingF1, f1)]
+        for streaming, batch in pairs:
+            for average in ("macro", "micro", "weighted"):
+                with self.subTest(metric=batch.__name__, average=average):
+                    got = self._stream(streaming(average=average))
+                    want = batch(self.y_true, self.y_pred, average=average)
+                    assert_allclose(got, want)
+
+    def test_binary_metrics_match_batch(self):
+        y_true, y_pred = self.y_true % 2, self.y_pred % 2
+        for streaming, batch in [(StreamingPrecision, precision),
+                                 (StreamingRecall, recall),
+                                 (StreamingF1, f1)]:
+            metric = streaming()
+            for t, p in _chunks(y_true, y_pred, size=50):
+                metric.update(t, p)
+            assert_allclose(metric.result(), batch(y_true, y_pred))
+
+    def test_binary_before_positive_seen_uses_zero_division(self):
+        metric = StreamingPrecision(zero_division=1)
+        self.assertEqual(metric.update([0, 0], [0, 0]).result(), 1.0)
+
+    def test_binary_with_three_classes_raises(self):
+        with self.assertRaises(ValueError):
+            StreamingF1().update([0, 1, 2], [0, 1, 2]).result()
+
+    def test_invalid_options(self):
+        with self.assertRaises(ValueError):
+            StreamingF1(average="median")
+        with self.assertRaises(ValueError):
+            StreamingRecall(zero_division=2)
+
+    def test_result_before_update_raises(self):
+        with self.assertRaisesRegex(RuntimeError, "no data"):
+            StreamingAccuracy().result()
+
+    def test_input_validation(self):
+        metric = StreamingAccuracy()
+        with self.assertRaises(ValueError):
+            metric.update([0, 1], [0])  # unequal lengths
+        with self.assertRaises(ValueError):
+            metric.update([[0, 1]], [[0, 1]])  # 2D
+        with self.assertRaises(ValueError):
+            metric.update([0.0, np.nan], [0.0, 1.0])  # NaN label
+        with self.assertRaises(TypeError):
+            metric.update([True, False], [True, True])  # booleans
+        with self.assertRaises(TypeError):
+            metric.update([0, 1], ["a", "b"])  # mixed kinds
+        self.assertEqual(metric.n_samples_, 0)
+
 if __name__ == "__main__":
     unittest.main()

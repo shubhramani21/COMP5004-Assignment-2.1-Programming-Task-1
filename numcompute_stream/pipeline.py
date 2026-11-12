@@ -2,6 +2,20 @@
 
 Components follow fit(X, y=None) and transform(X) conventions.
 An optional fit_transform(X, y=None) method is used when available.
+
+Streaming: ``partial_fit(X_chunk, y_chunk)`` updates every step with one
+chunk. Steps with their own partial_fit are updated incrementally; steps
+without one (e.g. stateless selectors) are fitted on the first chunk and
+then only transform.
+
+Example
+-------
+>>> pipe = Pipeline([
+...     ('scale', StandardScaler()),
+...     ('model', DecisionTreeClassifier(max_depth=5, buffer_size=500)),
+... ])
+>>> for X_chunk, y_chunk in stream:
+...     pipe.partial_fit(X_chunk, y_chunk)
 """
 import numpy as np
 
@@ -75,6 +89,19 @@ def _validate_named_steps(steps, *, name):
         names.add(step_name)
 
     return list(steps)
+
+
+def _partial_fit_step(step, X, y, *, first):
+    """Update one component with a chunk.
+
+    Components with partial_fit are updated incrementally. Components
+    without it are fitted on the first chunk only and kept frozen after,
+    which suits stateless steps such as column selectors.
+    """
+    if _has_method(step, "partial_fit"):
+        step.partial_fit(X, y)
+    elif first:
+        step.fit(X, y)
 
 
 def _fit_transform_step(step, X, y):

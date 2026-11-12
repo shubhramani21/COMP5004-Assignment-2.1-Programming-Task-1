@@ -656,7 +656,10 @@ class DecisionTreeClassifier:
             Fraction of training samples of each class in the reached leaf.
             Columns follow the order of ``classes_``.
         """
-        raise NotImplementedError
+        X = self._validate_X_predict(X)
+        counts = self._leaf_values(X)
+        # Every leaf holds at least one sample, so totals are positive.
+        return counts / counts.sum(axis=1, keepdims=True)
 
     def predict(self, X):
         """Predict class labels.

@@ -682,3 +682,94 @@ class StreamingMetric:
 
     def _result(self):
         raise NotImplementedError
+
+
+class StreamingConfusionMatrix(StreamingMetric):
+    """Confusion matrix accumulated over a stream of chunks.
+
+    Rows are true classes and columns are predicted classes. The matrix
+    grows when a chunk contains labels not seen before.
+
+    Parameters
+    ----------
+    labels : array-like or None, default=None
+        Fixed label order. If given, any other label raises ValueError.
+        If None, labels are added in order of first appearance (labels
+        that first appear in the same chunk are added in sorted order).
+
+    Attributes
+    ----------
+    matrix_ : numpy.ndarray of int64, shape (n_classes, n_classes)
+    labels_ : numpy.ndarray of object, shape (n_classes,)
+    """
+
+    def __init__(self, labels=None):
+        if labels is not None:
+            labels = np.asarray(labels)
+            if labels.ndim != 1 or labels.size == 0:
+                raise ValueError("labels must be a non-empty 1D sequence.")
+            if np.unique(labels).size != labels.size:
+                raise ValueError("labels must contain unique values.")
+        self.labels = labels
+        super().__init__()
+
+    def _reset_state(self):
+        if self.labels is None:
+            self._label_list = []
+        else:
+            self._label_list = self.labels.tolist()
+        self._index = {label: i for i, label in enumerate(self._label_list)}
+        n = len(self._label_list)
+        self.matrix_ = np.zeros((n, n), dtype=np.int64)
+
+    @property
+    def labels_(self):
+        return np.asarray(self._label_list, dtype=object)
+
+    def _update(self, y_true, y_pred):
+        true, pred = _validate_stream_labels(y_true, y_pred)
+        n = true.shape[0]
+        if n == 0:
+            return 0
+
+        try:
+            unique, inverse = np.unique(np.concatenate((true, pred)),
+                                        return_inverse=True)
+        except TypeError as exc:
+            raise TypeError(
+                "y_true and y_pred labels must be the same kind "
+                "(both numeric or both strings)."
+            ) from exc
+
+        # Register new labels (only the unique values are looped over).
+        new_labels = [label for label in unique.tolist()
+                      if label not in self._index]
+        if new_labels and self.labels is not None:
+            raise ValueError(
+                f"Labels {new_labels} are not in the fixed labels list."
+            )
+        for label in new_labels:
+            self._index[label] = len(self._label_list)
+            self._label_list.append(label)
+
+        n_classes = len(self._label_list)
+        if self.matrix_.shape[0] < n_classes:
+            grown = np.zeros((n_classes, n_classes), dtype=np.int64)
+            old = self.matrix_.shape[0]
+            grown[:old, :old] = self.matrix_
+            self.matrix_ = grown
+
+        # Map every sample to its class index, then count all
+        # (true, pred) pairs at once with bincount.
+        unique_index = np.array([self._index[label]
+                                 for label in unique.tolist()])
+        codes = unique_index[inverse.ravel()]
+        pairs = codes[:n] * n_classes + codes[n:]
+        self.matrix_ += np.bincount(
+            pairs, minlength=n_classes * n_classes
+        ).reshape(n_classes, n_classes)
+        return n
+
+    def _result(self):
+        """Return ``(matrix, labels)`` as copies."""
+        return self.matrix_.copy(), self.labels_

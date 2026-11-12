@@ -438,7 +438,14 @@ class DecisionTreeClassifier:
 
     def _validate_X_predict(self, X):
         """Validate prediction input against the trained tree."""
-        raise NotImplementedError
+        self._check_is_fitted()
+        X = _as_float_array(X, name="X", ndim=2, finite=True)
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but the tree was trained "
+                f"with {self.n_features_in_}."
+            )
+        return X
 
     def _resolve_max_features(self, n_features):
         """Convert ``max_features`` into an int in ``[1, n_features]``."""

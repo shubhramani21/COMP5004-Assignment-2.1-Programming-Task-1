@@ -1,8 +1,16 @@
-"""assess the metrics for classification and regression using numpy."""
+"""assess the metrics for classification and regression using numpy.
 
+The functions (``accuracy``, ``precision``, ...) score one batch of
+predictions. The ``Streaming*`` classes score a stream of chunks: call
+``update(y_true_chunk, y_pred_chunk)`` for each chunk, ``result()`` to
+read the metric over everything seen so far, and ``reset()`` to start
+again. ``RollingWindowMetric`` scores only the most recent samples.
+"""
+
+import copy
 import numpy as np
 from numbers import Real
-from .utils import _as_float_array
+from .utils import _as_float_array, _validate_integer
 
 def _validate_label_values(array, name):
     """Validate label values and return their common kind."""
@@ -558,3 +566,54 @@ def mse(y_true, y_pred):
         )
 
     return float(result)
+
+# ---------------------------------------------------------------------------
+# Streaming metrics
+# ---------------------------------------------------------------------------
+
+def _validate_stream_labels(y_true, y_pred):
+    """Validate one chunk of labels and return them as 1D arrays.
+
+    Labels may be numbers or strings, but both inputs must use the same
+    kind. Empty chunks are allowed (they leave a metric unchanged).
+
+    Raises
+    ------
+    TypeError
+        For boolean labels or numbers mixed with strings.
+    ValueError
+        For non-1D input, unequal lengths, NaN/inf or None labels.
+    """
+    true = np.asarray(y_true)
+    pred = np.asarray(y_pred)
+
+    if true.ndim != 1 or pred.ndim != 1:
+        raise ValueError("y_true and y_pred must be 1D.")
+    if true.shape != pred.shape:
+        raise ValueError(
+            "y_true and y_pred must have equal lengths; "
+            f"got {true.shape[0]} and {pred.shape[0]}."
+        )
+
+    kinds = []
+    for name, array in (("y_true", true), ("y_pred", pred)):
+        kind = array.dtype.kind
+        if kind == "b":
+            raise TypeError(f"{name} labels must not be boolean.")
+        if kind == "f" and not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} must not contain NaN or infinity.")
+        if kind == "O" and any(label is None for label in array.tolist()):
+            raise ValueError(f"{name} must not contain missing labels.")
+        if kind in "iuf":
+            kinds.append("numeric")
+        elif kind in "US":
+            kinds.append("string")
+        else:
+            kinds.append(None)  # object arrays: checked when sorting
+
+    if None not in kinds and true.size and kinds[0] != kinds[1]:
+        raise TypeError(
+            "y_true and y_pred labels must be the same kind "
+            "(both numeric or both strings)."
+        )
+    return true, pred

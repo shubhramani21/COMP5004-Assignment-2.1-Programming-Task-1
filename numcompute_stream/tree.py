@@ -81,7 +81,12 @@ def _entropy(counts):
     >>> float(_entropy([2, 2]))
     1.0
     """
-    raise NotImplementedError
+    proportions, _ = _proportions(counts)
+    # Only take the log where p > 0; elsewhere the term is defined as 0.
+    log_p = np.zeros_like(proportions)
+    np.log2(proportions, out=log_p, where=proportions > 0)
+    # Adding 0.0 turns any -0.0 into 0.0.
+    return -np.sum(proportions * log_p, axis=-1) + 0.0
 
 
 _CRITERIA = {"gini": _gini, "entropy": _entropy}

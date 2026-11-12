@@ -593,7 +593,31 @@ class DecisionTreeClassifier:
         -------
         self
         """
-        raise NotImplementedError
+        self._validate_params()
+
+        if self.n_features_in_ is not None:
+            expected = self.n_features_in_
+        elif self._buffer_X:
+            expected = self._buffer_X[0].shape[1]
+        else:
+            expected = None
+
+        X_chunk, y_chunk = self._validate_X_y(
+            X_chunk, y_chunk, n_features=expected, allow_empty=True,
+        )
+        if X_chunk.shape[0] == 0:
+            return self
+
+        self._buffer_X.append(X_chunk)
+        self._buffer_y.append(y_chunk)
+        self._buffer_count += X_chunk.shape[0]
+
+        if self._buffer_count >= self.buffer_size:
+            X_buffer = np.concatenate(self._buffer_X, axis=0)
+            y_buffer = np.concatenate(self._buffer_y, axis=0)
+            self._fit(X_buffer, y_buffer)
+            self._clear_buffer()
+        return self
 
     def _clear_buffer(self):
         """Empty the streaming buffer."""

@@ -271,6 +271,36 @@ class StreamTrainer:
             self.process_chunk(X_chunk, y_chunk)
         return self.history_
 
+    # -- results ------------------------------------------------------------
+
+    def get_metric(self, name):
+        """Return one logged value across chunks as a float array.
+
+        Example: ``trainer.get_metric("cumulative_accuracy")``.
+        """
+        if self.history_ and name not in self.history_[0]:
+            raise KeyError(f"Unknown metric {name!r}; choose from "
+                           f"{sorted(self.history_[0])}.")
+        return np.array([np.nan if entry[name] is None else entry[name]
+                         for entry in self.history_], dtype=np.float64)
+
+    def confusion_matrix(self):
+        """Cumulative ``(matrix, labels)`` over all scored chunks."""
+        return self._confusion.result()
+
+    def summary(self):
+        """Final cumulative metrics as a dict."""
+        return {
+            "n_chunks": self.n_chunks_,
+            "n_samples": self.n_samples_seen_,
+            "n_scored": self._accuracy.n_samples_,
+            "accuracy": self._result_or_nan(self._accuracy),
+            "f1_macro": self._result_or_nan(self._f1),
+            "auc": self._result_or_nan(self._auc),
+            "total_fit_time": float(np.nansum(self.get_metric("fit_time")))
+            if self.history_ else 0.0,
+        }
+
     # -- helpers ------------------------------------------------------------
 
     def _positive_scores(self, X):

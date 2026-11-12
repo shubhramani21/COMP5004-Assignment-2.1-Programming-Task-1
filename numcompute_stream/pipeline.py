@@ -340,6 +340,15 @@ class Pipeline:
         self._require("predict")
         return self._final_step.predict(self._transform_intermediate(X))
 
+    def predict_proba(self, X):
+        """Transform X through intermediate steps and predict probabilities.
+
+        Raises TypeError if the final step has no predict_proba method
+        and RuntimeError if the pipeline is unfitted.
+        """
+        self._require("predict_proba")
+        return self._final_step.predict_proba(self._transform_intermediate(X))
+
     def fit_transform(self, X, y=None):
         """Fit and transform X through every step.
 

@@ -151,6 +151,22 @@ class StandardScaler:
     """Standardize each column using training mean and population std.
     Ignore NaN during fit and preserve NaN during transform.
     Reject infinity and all-NaN training columns.
+
+    Streaming: partial_fit merges each chunk's per-column count, mean and
+    sum of squared deviations into the running totals (Chan/Welford
+    parallel update), so the result equals fitting on all chunks at once
+    without storing them.
+
+    Attributes
+    ----------
+    mean_ : numpy.ndarray, shape (n_features,)
+    var_ : numpy.ndarray, shape (n_features,)
+        Population variance per column.
+    scale_ : numpy.ndarray, shape (n_features,)
+        Standard deviation per column; 1 for constant or unseen columns.
+    n_samples_seen_ : numpy.ndarray of int64, shape (n_features,)
+        Non-NaN values seen per column.
+    n_features_in_ : int
     """
 
     def _validate_input(self, X, *, fitting=False):
@@ -184,24 +200,78 @@ class StandardScaler:
         Additional space: O(n_samples * n_features).
         """
         array = self._validate_input(X, fitting=True)
+        zeros = np.zeros(array.shape[1])
+        self._merge(array, zeros.astype(np.int64), zeros, zeros)
+        return self
 
-        # Calculate each column's statistics, ignoring NaN.
+    def partial_fit(self, X, y=None):
+        """Update the running mean and variance with one chunk; return self.
+
+        X: 2D real numeric chunk of shape (n_chunk, n_features). Zero rows
+        and all-NaN columns are allowed; NaN is ignored. The column count
+        must match earlier chunks. A failed call keeps the previous state.
+
+        Time: O(n_chunk * n_features). Additional space: same; earlier
+        chunks are never stored.
+        """
+        array = self._validate_input(X)
+        if array.shape[1] == 0:
+            raise ValueError("X must have at least one feature.")
+        if hasattr(self, "n_features_in_"):
+            if array.shape[1] != self.n_features_in_:
+                raise ValueError(f"X must have {self.n_features_in_} features; "
+                                 f"got {array.shape[1]}.")
+            count, mean, m2 = self.n_samples_seen_, self.mean_, self._m2
+        else:
+            zeros = np.zeros(array.shape[1])
+            count, mean, m2 = zeros.astype(np.int64), zeros, zeros
+        self._merge(array, count, mean, m2)
+        return self
+
+    def _merge(self, array, count, mean, m2):
+        """Combine running (count, mean, M2) with the chunk's and commit.
+
+        M2 is the sum of squared deviations from the mean. For two groups
+        a and b with delta = mean_b - mean_a:
+            mean = mean_a + delta * n_b / n
+            M2   = M2_a + M2_b + delta**2 * n_a * n_b / n
+        """
+        observed = ~np.isnan(array)
+        chunk_count = observed.sum(axis=0)
+        safe_count = np.maximum(chunk_count, 1)
+        values = np.where(observed, array, 0.0)
+
         with np.errstate(over="ignore", invalid="ignore"):
-            mean = np.nanmean(array, axis=0)
-            scale = np.nanstd(array, axis=0, ddof=0)
+            chunk_mean = values.sum(axis=0) / safe_count
+            deviations = np.where(observed, array - chunk_mean, 0.0)
+            chunk_m2 = np.sum(deviations * deviations, axis=0)
 
-        if not np.all(np.isfinite(mean)) or not np.all(np.isfinite(scale)):
+            total = count + chunk_count
+            safe_total = np.maximum(total, 1)
+            # Columns with no new values keep their state (delta = 0).
+            delta = np.where(chunk_count > 0, chunk_mean - mean, 0.0)
+            # Columns seen for the first time take the chunk values directly.
+            new_mean = np.where(count == 0, chunk_mean,
+                                mean + delta * (chunk_count / safe_total))
+            new_m2 = np.where(count == 0, chunk_m2,
+                              m2 + chunk_m2
+                              + delta * delta * (count * (chunk_count / safe_total)))
+            var = new_m2 / safe_total
+            scale = np.sqrt(var)
+
+        if not (np.all(np.isfinite(new_mean)) and np.all(np.isfinite(scale))):
             raise ValueError("Training statistics exceed the supported numeric range.")
 
-        # Avoid division by zero for constant training columns.
+        # Avoid division by zero for constant (or not yet seen) columns.
         scale = np.where(scale == 0.0, 1.0, scale)
 
         # Save state only after all validation succeeds.
-        self.mean_ = mean
+        self.n_samples_seen_ = total
+        self.mean_ = new_mean
+        self.var_ = var
         self.scale_ = scale
+        self._m2 = new_m2
         self.n_features_in_ = array.shape[1]
-
-        return self
 
     def transform(self, X):
         """Transform data using the previously fitted statistics.

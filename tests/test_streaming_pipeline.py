@@ -121,5 +121,28 @@ class TestPipelinePartialFit(unittest.TestCase):
         pipe.partial_fit(X[300:], y[300:])
         assert_allclose(scaler.mean_, X.mean(axis=0))
 
+
+class TestFeatureUnionPartialFit(unittest.TestCase):
+    def test_union_inside_streaming_pipeline(self):
+        X, y = _data()
+        union = FeatureUnion([("std", StandardScaler()),
+                              ("minmax", MinMaxScaler())])
+        model = DecisionTreeClassifier(max_depth=4, buffer_size=200)
+        pipe = Pipeline([("features", union), ("model", model)])
+        for X_chunk, y_chunk in _chunks(X, y, 100):
+            pipe.partial_fit(X_chunk, y_chunk)
+        self.assertEqual(model.n_features_in_, 6)
+        self.assertEqual(pipe.predict(X).shape, (600,))
+
+    def test_branches_updated_and_stateless_fitted_once(self):
+        X, _ = _data(60)
+        counter = _CountingTransformer()
+        union = FeatureUnion([("std", StandardScaler()), ("count", counter)])
+        union.partial_fit(X[:30]).partial_fit(X[30:])
+        assert_allclose(union.named_transformers["std"].mean_, X.mean(axis=0))
+        self.assertEqual(counter.n_fits, 1)
+        self.assertEqual(union.transform(X).shape, (60, 6))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,5 +112,21 @@ class TestStreamingStandardScaler(unittest.TestCase):
             scaler.partial_fit([[1.0]])
         assert_array_equal(scaler.mean_, [1.0, 2.0])
 
+
+class TestStreamingMinMaxScaler(unittest.TestCase):
+    def test_matches_full_fit(self):
+        X = _random_with_nans(4)
+        streamed = _stream(MinMaxScaler(), X, size=40)
+        full = MinMaxScaler().fit(X)
+        assert_array_equal(streamed.data_min_, full.data_min_)
+        assert_array_equal(streamed.data_max_, full.data_max_)
+        assert_allclose(streamed.transform(X), full.transform(X))
+
+    def test_unseen_column_passes_through(self):
+        scaler = MinMaxScaler().partial_fit([[np.nan, 0.0], [np.nan, 4.0]])
+        assert_allclose(scaler.transform([[2.0, 2.0]]), [[2.0, 0.5]])
+        scaler.partial_fit([[10.0, 4.0], [20.0, 4.0]])
+        assert_allclose(scaler.transform([[15.0, 2.0]]), [[0.5, 0.5]])
+
 if __name__ == "__main__":
     unittest.main()

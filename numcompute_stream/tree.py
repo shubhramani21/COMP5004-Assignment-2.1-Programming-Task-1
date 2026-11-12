@@ -477,7 +477,11 @@ class DecisionTreeClassifier:
         -------
         self
         """
-        raise NotImplementedError
+        self._validate_params()
+        X, y = self._validate_X_y(X, y)
+        self._fit(X, y)
+        self._clear_buffer()
+        return self
 
     def _fit(self, X, y):
         """Train on already-validated data."""

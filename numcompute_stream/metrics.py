@@ -921,3 +921,71 @@ class StreamingF1(_AveragedMetric):
     """
 
     _metric = "f1"
+
+
+class StreamingAUC(StreamingMetric):
+    """Exact binary ROC AUC accumulated over a stream.
+
+    Instead of storing every score, keeps one row per *distinct* score
+    with the number of positive and negative samples that received it.
+    Each update merges the new chunk in with ``np.unique`` and
+    ``np.bincount``. AUC is the probability that a random positive gets a
+    higher score than a random negative (ties count as 1/2).
+
+    Parameters
+    ----------
+    pos_label : label, default=1
+        The positive class in ``y_true``.
+
+    Notes
+    -----
+    ``update(y_true, y_score)`` takes scores (e.g. ``predict_proba[:, 1]``),
+    not predicted labels. ``result()`` returns NaN while only one class
+    has been seen, because AUC is undefined then. Memory is O(number of
+    distinct scores), which is small for tree probabilities.
+    """
+
+    def __init__(self, pos_label=1):
+        self.pos_label = pos_label
+        super().__init__()
+
+    def _reset_state(self):
+        self._scores = np.empty(0, dtype=np.float64)
+        self._pos = np.empty(0, dtype=np.float64)
+        self._neg = np.empty(0, dtype=np.float64)
+
+    def _update(self, y_true, y_score):
+        true = np.asarray(y_true)
+        score = _as_float_array(y_score, name="y_score", ndim=1,
+                                finite=True)
+        if true.ndim != 1 or true.shape != score.shape:
+            raise ValueError(
+                "y_true and y_score must be 1D with equal lengths."
+            )
+        if true.dtype.kind == "f" and not np.all(np.isfinite(true)):
+            raise ValueError("y_true must not contain NaN or infinity.")
+        if score.size == 0:
+            return 0
+
+        is_pos = (true == self.pos_label).astype(np.float64)
+
+        all_scores = np.concatenate((self._scores, score))
+        all_pos = np.concatenate((self._pos, is_pos))
+        all_neg = np.concatenate((self._neg, 1.0 - is_pos))
+
+        self._scores, inverse = np.unique(all_scores, return_inverse=True)
+        inverse = inverse.ravel()
+        size = self._scores.size
+        self._pos = np.bincount(inverse, weights=all_pos, minlength=size)
+        self._neg = np.bincount(inverse, weights=all_neg, minlength=size)
+        return score.size
+
+    def _result(self):
+        n_pos = self._pos.sum()
+        n_neg = self._neg.sum()
+        if n_pos == 0 or n_neg == 0:
+            return float("nan")
+        # Scores are sorted ascending: negatives strictly below each score.
+        neg_below = np.cumsum(self._neg) - self._neg
+        wins = np.sum(self._pos * (neg_below + 0.5 * self._neg))
+        return float(wins / (n_pos * n_neg))

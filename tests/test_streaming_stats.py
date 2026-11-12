@@ -161,5 +161,17 @@ class TestStreamingSummary(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             StreamingSummary().result()
 
+
+class TestDocstringExamples(unittest.TestCase):
+    def test_streaming_examples(self):
+        finder = doctest.DocTestFinder()
+        runner = doctest.DocTestRunner(optionflags=doctest.NORMALIZE_WHITESPACE)
+        for obj in (StreamingQuantile, StreamingSummary):
+            for test in finder.find(obj, globs=vars(stats)):
+                runner.run(test)
+        self.assertGreater(runner.tries, 0)
+        self.assertEqual(runner.failures, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

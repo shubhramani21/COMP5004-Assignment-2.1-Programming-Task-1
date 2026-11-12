@@ -1286,3 +1286,149 @@ class StreamingHistogram:
         fraction = np.clip(fraction, 0.0, 1.0)
         return edges[index] + fraction * (edges[index + 1] - edges[index])
 
+
+class StreamingSummary:
+    """Per-column statistics of 2D chunks, updated with ``update_stats``.
+
+    Tracks for every column: count of non-NaN values, mean, variance,
+    min, max and P-squared quantile estimates. Mean and variance are
+    merged across chunks for all columns at once (vectorised Chan/Welford
+    update), so they equal the statistics of all data seen.
+
+    Parameters
+    ----------
+    quantiles : sequence of float, default=(0.25, 0.5, 0.75)
+        Quantile levels to estimate per column. Use () to skip them.
+    nan_policy : {"omit", "raise"}, default="omit"
+
+    Examples
+    --------
+    >>> summary = StreamingSummary()
+    >>> _ = summary.update_stats([[1, 10], [3, 30]])
+    >>> summary.update_stats([[5, 50]]).result()["mean"]
+    array([ 3., 30.])
+    """
+
+    def __init__(self, quantiles=(0.25, 0.5, 0.75), nan_policy="omit"):
+        quantiles = np.asarray(quantiles, dtype=np.float64)
+        self.quantiles = (quantiles if quantiles.size == 0 else
+                          _validate_quantile_levels(quantiles))
+        nan_policy = _validate_nan_policy(nan_policy)
+        if nan_policy == "propagate":
+            raise ValueError("StreamingSummary supports nan_policy "
+                             "'omit' or 'raise'.")
+        self.nan_policy = nan_policy
+        self.reset()
+
+    def reset(self):
+        """Forget all chunks. Returns self."""
+        self.n_features_in_ = None
+        self.n_rows_ = 0
+        self._count = self._mean = self._m2 = None
+        self._min = self._max = None
+        self._quantiles = None
+        return self
+
+    def update_stats(self, X_chunk):
+        """Merge one chunk into the running per-column statistics.
+
+        Parameters
+        ----------
+        X_chunk : array-like, shape (n_chunk, n_features) or (n_chunk,)
+            A 1D chunk is treated as a single column.
+
+        Returns
+        -------
+        self
+        """
+        array, _, _, nan_mask = _prepare_reduction(X_chunk, None,
+                                                   self.nan_policy)
+        if array.ndim == 1:
+            array = array[:, None]
+            nan_mask = nan_mask[:, None]
+        if array.ndim != 2:
+            raise ValueError("X_chunk must be 1D or 2D.")
+        n_features = array.shape[1]
+        if n_features == 0:
+            raise ValueError("X_chunk must have at least one column.")
+        if self.n_features_in_ is None:
+            zeros = np.zeros(n_features)
+            count, mean, m2 = zeros.astype(np.int64), zeros, zeros
+            col_min = np.full(n_features, np.inf)
+            col_max = np.full(n_features, -np.inf)
+        elif n_features != self.n_features_in_:
+            raise ValueError(f"X_chunk must have {self.n_features_in_} "
+                             f"columns; got {n_features}.")
+        else:
+            count, mean, m2 = self._count, self._mean, self._m2
+            col_min, col_max = self._min, self._max
+
+        observed = ~nan_mask
+        chunk_count = observed.sum(axis=0)
+        safe_chunk = np.maximum(chunk_count, 1)
+        with np.errstate(over="ignore", invalid="ignore"):
+            chunk_mean = np.where(observed, array, 0.0).sum(axis=0) / safe_chunk
+            dev = np.where(observed, array - chunk_mean, 0.0)
+            chunk_m2 = np.sum(dev * dev, axis=0)
+            total = count + chunk_count
+            safe_total = np.maximum(total, 1)
+            delta = np.where(chunk_count > 0, chunk_mean - mean, 0.0)
+            new_mean = np.where(count == 0, chunk_mean,
+                                mean + delta * (chunk_count / safe_total))
+            new_m2 = np.where(count == 0, chunk_m2,
+                              m2 + chunk_m2
+                              + delta * delta * (count * (chunk_count / safe_total)))
+        if not (np.all(np.isfinite(new_mean)) and np.all(np.isfinite(new_m2))):
+            raise ValueError("Statistics exceed the supported float64 range.")
+
+        new_min = np.minimum(col_min,
+                             np.where(observed, array, np.inf).min(axis=0, initial=np.inf))
+        new_max = np.maximum(col_max,
+                             np.where(observed, array, -np.inf).max(axis=0, initial=-np.inf))
+
+        # Commit only after every check passed.
+        if self._quantiles is None:
+            self._quantiles = ([StreamingQuantile(self.quantiles)
+                                for _ in range(n_features)]
+                               if self.quantiles.size else [])
+        for column, estimator in enumerate(self._quantiles):
+            estimator.update(array[observed[:, column], column])
+
+        self.n_features_in_ = n_features
+        self.n_rows_ += array.shape[0]
+        self._count, self._mean, self._m2 = total, new_mean, new_m2
+        self._min, self._max = new_min, new_max
+        return self
+
+    def result(self, ddof=0):
+        """Return the current statistics as a dict of arrays.
+
+        Keys: "count", "mean", "var", "std", "min", "max" (shape
+        (n_features,)) and "quantiles" (shape (len(quantiles),
+        n_features)). Columns with no values yet give NaN.
+
+        Raises
+        ------
+        RuntimeError
+            Before the first ``update_stats`` call.
+        """
+        if self.n_features_in_ is None:
+            raise RuntimeError("StreamingSummary has no data; "
+                               "call update_stats() first.")
+        ddof = _validate_integer(ddof, name="ddof", minimum=0)
+        seen = self._count > 0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            var = np.where(self._count > ddof,
+                           self._m2 / (self._count - ddof), np.nan)
+        quantiles = (np.column_stack([e.result() for e in self._quantiles])
+                     if self._quantiles else
+                     np.empty((0, self.n_features_in_)))
+        return {
+            "count": self._count.copy(),
+            "mean": np.where(seen, self._mean, np.nan),
+            "var": var,
+            "std": np.sqrt(var),
+            "min": np.where(seen, self._min, np.nan),
+            "max": np.where(seen, self._max, np.nan),
+            "quantiles": quantiles,
+        }

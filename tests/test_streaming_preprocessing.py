@@ -128,5 +128,39 @@ class TestStreamingMinMaxScaler(unittest.TestCase):
         scaler.partial_fit([[10.0, 4.0], [20.0, 4.0]])
         assert_allclose(scaler.transform([[15.0, 2.0]]), [[0.5, 0.5]])
 
+
+class TestStreamingOneHotEncoder(unittest.TestCase):
+    def test_categories_grow(self):
+        encoder = OneHotEncoder()
+        encoder.partial_fit([["red"], ["blue"]])
+        self.assertEqual(encoder.n_features_out_, 2)
+        encoder.partial_fit([["green"], ["red"]])
+        assert_array_equal(encoder.categories_[0], ["red", "blue", "green"])
+        assert_array_equal(encoder.transform([["green"], ["red"]]),
+                           [[0, 0, 1], [1, 0, 0]])
+
+    def test_two_columns_offsets_update(self):
+        encoder = OneHotEncoder().partial_fit([["a", 1]])
+        encoder.partial_fit([["b", 2]])
+        assert_array_equal(encoder.transform([["b", 1]]), [[0, 1, 1, 0]])
+
+    def test_unknown_before_seen(self):
+        encoder = OneHotEncoder(handle_unknown="ignore").partial_fit([["x"]])
+        assert_array_equal(encoder.transform([["y"]]), [[0]])
+        with self.assertRaises(ValueError):
+            OneHotEncoder().partial_fit([["x"]]).transform([["y"]])
+
+    def test_mixed_kinds_across_chunks_rejected(self):
+        encoder = OneHotEncoder().partial_fit([["a"]])
+        with self.assertRaises(TypeError):
+            encoder.partial_fit([[1]])
+        assert_array_equal(encoder.categories_[0], ["a"])
+
+    def test_fit_resets_categories(self):
+        encoder = OneHotEncoder().partial_fit([["a"], ["b"]])
+        encoder.fit([["c"]])
+        assert_array_equal(encoder.categories_[0], ["c"])
+
+
 if __name__ == "__main__":
     unittest.main()

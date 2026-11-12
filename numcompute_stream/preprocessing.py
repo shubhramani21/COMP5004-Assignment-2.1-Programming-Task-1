@@ -316,6 +316,10 @@ class MinMaxScaler:
 
     Ignore NaN during fit and preserve NaN during transform.
     New data is not clipped to feature_range.
+
+    Streaming: partial_fit keeps the running minimum and maximum of each
+    column. Columns with no values yet are passed through shifted by
+    feature_range's lower bound (min 0, range 1).
     """
 
     def __init__(self, feature_range=(0, 1)):
@@ -387,14 +391,46 @@ class MinMaxScaler:
 
         Time: O(N * D). Additional space: O(N * D).
         """
-        lower, upper, span = self._validate_range()
+        self._validate_range()
         array = self._validate_input(X, fitting=True)
+        self._commit(np.nanmin(array, axis=0), np.nanmax(array, axis=0),
+                     array.shape[1])
+        return self
 
-        data_min = np.nanmin(array, axis=0)
-        data_max = np.nanmax(array, axis=0)
+    def partial_fit(self, X, y=None):
+        """Update the running column minima and maxima; return self.
+
+        X: 2D real numeric chunk. Zero rows and all-NaN columns are
+        allowed. The column count must match earlier chunks. A failed
+        call keeps the previous state.
+        """
+        array = self._validate_input(X)
+        if array.shape[1] == 0:
+            raise ValueError("X must have at least one feature.")
+        observed = ~np.isnan(array)
+        chunk_min = np.where(observed, array, np.inf).min(axis=0, initial=np.inf)
+        chunk_max = np.where(observed, array, -np.inf).max(axis=0, initial=-np.inf)
+        # Unseen columns are NaN; fmin/fmax ignore NaN on either side.
+        chunk_min = np.where(np.isinf(chunk_min), np.nan, chunk_min)
+        chunk_max = np.where(np.isinf(chunk_max), np.nan, chunk_max)
+
+        if hasattr(self, "n_features_in_"):
+            if array.shape[1] != self.n_features_in_:
+                raise ValueError(f"X must have {self.n_features_in_} features; "
+                                 f"got {array.shape[1]}.")
+            chunk_min = np.fmin(self.data_min_, chunk_min)
+            chunk_max = np.fmax(self.data_max_, chunk_max)
+        self._commit(chunk_min, chunk_max, array.shape[1])
+        return self
+
+    def _commit(self, data_min, data_max, n_features):
+        """Validate ranges and store fitted state."""
+        lower, upper, span = self._validate_range()
+
+        unseen = np.isnan(data_min)
 
         with np.errstate(over="ignore", invalid="ignore"):
-            data_range = data_max - data_min
+            data_range = np.where(unseen, 1.0, data_max - data_min)
 
         if not np.all(np.isfinite(data_range)):
             raise ValueError("Training ranges exceed the supported numeric range.")
@@ -404,13 +440,12 @@ class MinMaxScaler:
 
         self.data_min_ = data_min
         self.data_max_ = data_max
-        self.n_features_in_ = array.shape[1]
+        self.n_features_in_ = n_features
 
+        self._offset = np.where(unseen, 0.0, data_min)
         self._effective_range = effective_range
         self._lower = lower
         self._span = span
-
-        return self
 
     def transform(self, X):
         """Scale X using the previously fitted parameters.
@@ -436,7 +471,7 @@ class MinMaxScaler:
             )
 
         with np.errstate(over="ignore", invalid="ignore"):
-            result = (array - self.data_min_) / self._effective_range
+            result = (array - self._offset) / self._effective_range
             result = result * self._span + self._lower
 
         if np.any(np.isfinite(array) & ~np.isfinite(result)):

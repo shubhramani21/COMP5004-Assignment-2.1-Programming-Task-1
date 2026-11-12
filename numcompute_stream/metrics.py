@@ -851,3 +851,18 @@ class _ConfusionMatrixMetric(StreamingMetric):
     def confusion_matrix_(self):
         """The accumulated ``StreamingConfusionMatrix``."""
         return self._confusion
+
+
+class StreamingAccuracy(_ConfusionMatrixMetric):
+    """Cumulative accuracy over a stream.
+
+    Examples
+    --------
+    >>> acc = StreamingAccuracy()
+    >>> acc.update([0, 1], [0, 0]).update([1, 1], [1, 1]).result()
+    0.75
+    """
+
+    def _result(self):
+        matrix = self._confusion.matrix_
+        return float(np.trace(matrix) / matrix.sum())

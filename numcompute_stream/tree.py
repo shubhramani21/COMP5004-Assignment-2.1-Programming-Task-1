@@ -406,7 +406,35 @@ class DecisionTreeClassifier:
         X : numpy.ndarray of float64, shape (n_samples, n_features)
         y : numpy.ndarray, shape (n_samples,)
         """
-        raise NotImplementedError
+        X = _as_float_array(X, name="X", ndim=2, finite=True)
+
+        y = np.asarray(y)
+        if y.ndim == 2 and y.shape[1] == 1:
+            y = y.ravel()
+        if y.ndim != 1:
+            raise ValueError(
+                f"y must be 1D with shape (n_samples,); got shape {y.shape}."
+            )
+        if y.shape[0] != X.shape[0]:
+            raise ValueError(
+                "X and y must have the same number of samples; "
+                f"got {X.shape[0]} and {y.shape[0]}."
+            )
+        if y.dtype.kind == "f" and np.any(np.isnan(y)):
+            raise ValueError("y must not contain NaN labels.")
+        if y.dtype.kind == "O" and any(label is None for label in y):
+            raise ValueError("y must not contain None labels.")
+
+        if X.shape[0] == 0 and not allow_empty:
+            raise ValueError("X and y must contain at least one sample.")
+        if X.shape[1] == 0:
+            raise ValueError("X must have at least one feature.")
+        if n_features is not None and X.shape[1] != n_features:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but {n_features} were "
+                "expected from earlier data."
+            )
+        return X, y
 
     def _validate_X_predict(self, X):
         """Validate prediction input against the trained tree."""

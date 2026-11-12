@@ -135,3 +135,17 @@ def bench_tree_fit(sizes, repeats):
                          benchmark(fit_loop, repeats=repeats),
                          benchmark(fit_vectorised, repeats=repeats)))
     return rows
+
+
+def bench_tree_predict(sizes, repeats):
+    """Per-sample tree walk vs mask-based group routing."""
+    rows = []
+    X_train, y_train = make_stream_data(2000, seed=1)
+    tree = DecisionTreeClassifier(max_depth=8).fit(X_train, y_train)
+    for n in sizes:
+        X, _ = make_stream_data(n, seed=n + 7)
+        assert_array_equal(loop_tree_predict(tree, X), tree.predict(X))
+        rows.append(_row("tree_predict", n,
+                         benchmark(loop_tree_predict, tree, X, repeats=repeats),
+                         benchmark(tree.predict, X, repeats=repeats)))
+    return rows

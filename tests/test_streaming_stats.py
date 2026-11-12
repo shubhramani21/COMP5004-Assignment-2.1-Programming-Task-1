@@ -65,5 +65,58 @@ class TestStreamingQuantile(unittest.TestCase):
         with self.assertRaises(ValueError):
             StreamingQuantile().update([[1.0, 2.0]])
 
+
+class TestStreamingHistogram(unittest.TestCase):
+    def test_matches_batch_histogram(self):
+        x = np.random.default_rng(2).normal(size=1000)
+        h = StreamingHistogram(bins=20, range=(-4, 4))
+        for chunk in _chunks(x, 77):
+            h.update(chunk)
+        expected, edges = histogram(x, bins=20, range=(-4, 4))
+        counts, got_edges = h.result()
+        assert_array_equal(counts, expected)
+        assert_array_equal(got_edges, edges)
+
+    def test_out_of_range_values_tallied(self):
+        h = StreamingHistogram(bins=2, range=(0, 2)).update([-1, 0.5, 1.5, 9, 9])
+        assert_array_equal(h.counts_, [1, 1])
+        self.assertEqual(h.n_below_, 1)
+        self.assertEqual(h.n_above_, 2)
+
+    def test_edges_learned_from_first_chunk(self):
+        h = StreamingHistogram(bins=4)
+        h.update([])  # empty chunk: edges still unknown
+        self.assertIsNone(h.edges_)
+        h.update([0.0, 4.0]).update([2.0, 10.0])
+        assert_array_equal(h.edges_, [0, 1, 2, 3, 4])
+        self.assertEqual(h.n_above_, 1)
+
+    def test_sliding_window_drops_old_chunks(self):
+        h = StreamingHistogram(bins=[0, 1, 2], window=2)
+        h.update([0.5, 0.5]).update([1.5]).update([1.5, 1.5])
+        assert_array_equal(h.counts_, [0, 3])
+        h.reset()
+        assert_array_equal(h.counts_, [0, 0])
+
+    def test_quantile_from_bins(self):
+        x = np.random.default_rng(3).uniform(0, 10, size=5000)
+        h = StreamingHistogram(bins=100, range=(0, 10))
+        for chunk in _chunks(x, 500):
+            h.update(chunk)
+        assert_allclose(h.quantile([0.0, 0.5, 1.0]),
+                        np.quantile(x, [0.0, 0.5, 1.0]), atol=0.1)
+
+    def test_errors(self):
+        with self.assertRaises(RuntimeError):
+            StreamingHistogram().result()
+        with self.assertRaises(ValueError):
+            StreamingHistogram(bins=0)
+        with self.assertRaises(ValueError):
+            StreamingHistogram(window=0)
+        with self.assertRaises(ValueError):
+            StreamingHistogram(bins=[0, 0, 1])
+        with self.assertRaises(ValueError):
+            StreamingHistogram(bins=2, range=(0, 1)).update([np.inf])
+
 if __name__ == "__main__":
     unittest.main()

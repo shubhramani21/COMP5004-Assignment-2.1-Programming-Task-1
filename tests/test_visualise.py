@@ -55,5 +55,20 @@ class TestPlotMetricOverTime(_CloseFigures):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 plot_metric_over_time(bad)
 
+
+class TestCompareModels(_CloseFigures):
+    def test_two_lines_with_labels(self):
+        _, ax = compare_models([0.7, 0.8, 0.9], [0.6, 0.9],
+                               labels=["buffer 100", "buffer 500"])
+        self.assertEqual(len(ax.lines), 2)
+        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        self.assertEqual(labels, ["buffer 100", "buffer 500"])
+
+    def test_bad_labels(self):
+        with self.assertRaises(ValueError):
+            compare_models([1], [2], labels=["only one"])
+        with self.assertRaises(ValueError):
+            compare_models([1], [2], labels=["a", 2])
+
 if __name__ == "__main__":
     unittest.main()

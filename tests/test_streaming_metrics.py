@@ -155,5 +155,42 @@ class TestStreamingScores(unittest.TestCase):
             metric.update([0, 1], ["a", "b"])  # mixed kinds
         self.assertEqual(metric.n_samples_, 0)
 
+
+class TestStreamingAUC(unittest.TestCase):
+    def test_matches_brute_force(self):
+        rng = np.random.default_rng(2)
+        y_true = rng.integers(0, 2, 300)
+        # Rounded scores create many ties across chunks.
+        scores = np.round(0.3 * y_true + 0.7 * rng.random(300), 1)
+        auc = StreamingAUC()
+        for t, s in _chunks(y_true, scores, size=40):
+            auc.update(t, s)
+        assert_allclose(auc.result(), _brute_force_auc(y_true, scores))
+
+    def test_perfect_and_reversed_ranking(self):
+        self.assertEqual(StreamingAUC().update([0, 0, 1, 1],
+                                               [.1, .2, .8, .9]).result(), 1.0)
+        self.assertEqual(StreamingAUC().update([0, 0, 1, 1],
+                                               [.9, .8, .2, .1]).result(), 0.0)
+
+    def test_all_tied_scores_give_half(self):
+        auc = StreamingAUC().update([0, 1, 0, 1], [0.5, 0.5, 0.5, 0.5])
+        self.assertEqual(auc.result(), 0.5)
+
+    def test_single_class_is_nan(self):
+        auc = StreamingAUC().update([1, 1], [0.2, 0.9])
+        self.assertTrue(np.isnan(auc.result()))
+
+    def test_string_pos_label(self):
+        auc = StreamingAUC(pos_label="yes")
+        auc.update(["no", "yes"], [0.3, 0.6])
+        self.assertEqual(auc.result(), 1.0)
+
+    def test_score_validation(self):
+        with self.assertRaises(ValueError):
+            StreamingAUC().update([0, 1], [0.5, np.nan])
+        with self.assertRaises(ValueError):
+            StreamingAUC().update([0, 1, 1], [0.5, 0.2])
+
 if __name__ == "__main__":
     unittest.main()

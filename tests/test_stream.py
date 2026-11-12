@@ -81,5 +81,66 @@ class TestStreamTrainerLoop(unittest.TestCase):
         self.assertGreater(result["chunk_accuracy"], 0.9)
         np.testing.assert_array_equal(trainer.last_y_true_, y)
 
+
+class TestStreamTrainerLogging(unittest.TestCase):
+    def test_history_keys_and_get_metric(self):
+        trainer = StreamTrainer(_pipe(), rolling_window=150, auc_pos_label=1)
+        trainer.run(_stream())
+        expected_keys = {
+            "chunk", "n_samples", "scored", "chunk_accuracy",
+            "cumulative_accuracy", "cumulative_f1_macro", "rolling_accuracy",
+            "cumulative_auc", "fit_time", "predict_time", "retrained",
+            "n_retrains", "buffer_count", "model_bytes",
+        }
+        self.assertEqual(set(trainer.history_[0]), expected_keys)
+        auc = trainer.get_metric("cumulative_auc")
+        self.assertTrue(np.all(np.isnan(auc[:2])))
+        self.assertTrue(np.all((auc[2:] > 0.8) & (auc[2:] <= 1.0)))
+        self.assertTrue(np.all(np.isfinite(trainer.get_metric("rolling_accuracy")[2:])))
+        with self.assertRaises(KeyError):
+            trainer.get_metric("nope")
+
+    def test_memory_tracks_buffer(self):
+        trainer = StreamTrainer(DecisionTreeClassifier(buffer_size=300))
+        trainer.run(_stream(chunk=100))
+        memory = trainer.get_metric("model_bytes")
+        X, y = _stream(chunk=100)[0]
+        chunk_bytes = X.nbytes + y.nbytes
+        # Each buffered chunk adds at least its own data to the model.
+        # Retrains happen at chunks 2, 5, 8; chunks 3 -> 4 share one tree.
+        self.assertGreaterEqual(memory[1] - memory[0], chunk_bytes)
+        self.assertGreaterEqual(memory[4] - memory[3], chunk_bytes)
+        self.assertTrue(trainer.history_[2]["retrained"])
+        self.assertEqual(trainer.history_[2]["buffer_count"], 0)
+        no_memory = StreamTrainer(DecisionTreeClassifier(), track_memory=False)
+        no_memory.process_chunk(*_stream()[0])
+        self.assertTrue(np.isnan(no_memory.history_[0]["model_bytes"]))
+
+    def test_confusion_matrix_and_reset(self):
+        trainer = StreamTrainer(DecisionTreeClassifier(buffer_size=100))
+        trainer.run(_stream())
+        matrix, labels = trainer.confusion_matrix()
+        self.assertEqual(matrix.sum(), 900)
+        self.assertEqual(list(labels), [0, 1])
+        trainer.reset()
+        self.assertEqual(trainer.history_, [])
+        self.assertTrue(np.isnan(trainer.summary()["accuracy"]))
+
+    def test_verbose_prints_each_chunk(self):
+        trainer = StreamTrainer(_pipe(), verbose=True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            trainer.run(_stream()[:3])
+        lines = output.getvalue().strip().splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("retrained", lines[1])
+
+    def test_model_without_retrain_info(self):
+        trainer = StreamTrainer(_NoRetrainModel())
+        entry = trainer.process_chunk(*_stream()[0])
+        self.assertTrue(entry["scored"])
+        self.assertIsNone(entry["retrained"])
+        self.assertTrue(np.isnan(trainer.get_metric("retrained")[0]))
+
 if __name__ == "__main__":
     unittest.main()

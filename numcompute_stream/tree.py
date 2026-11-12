@@ -717,7 +717,14 @@ class DecisionTreeClassifier:
 
     def get_depth(self):
         """Depth of the trained tree (a single leaf has depth 0)."""
-        raise NotImplementedError
+        self._check_is_fitted()
+
+        def depth(node):
+            if node.is_leaf:
+                return 0
+            return 1 + max(depth(node.left), depth(node.right))
+
+        return depth(self.root_)
 
     def get_n_leaves(self):
         """Number of leaves in the trained tree."""

@@ -114,3 +114,24 @@ def bench_split_search(sizes, repeats):
             benchmark(_best_split_feature, x, y, 3, _gini, repeats=repeats),
         ))
     return rows
+
+
+def bench_tree_fit(sizes, repeats):
+    """Whole tree training with the loop vs vectorised split search."""
+    rows = []
+    for n in sizes:
+        X, y = make_stream_data(n, seed=n)
+
+        def fit_vectorised():
+            return DecisionTreeClassifier(max_depth=6).fit(X, y)
+
+        def fit_loop():
+            with mock.patch.object(tree_module, "_best_split_feature",
+                                   _best_split_feature_loop):
+                return DecisionTreeClassifier(max_depth=6).fit(X, y)
+
+        assert_array_equal(fit_loop().predict(X), fit_vectorised().predict(X))
+        rows.append(_row("tree_fit", n,
+                         benchmark(fit_loop, repeats=repeats),
+                         benchmark(fit_vectorised, repeats=repeats)))
+    return rows

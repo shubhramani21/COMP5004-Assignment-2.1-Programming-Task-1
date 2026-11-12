@@ -93,5 +93,68 @@ class TestSplitSearch(unittest.TestCase):
         self.assertTrue(lower <= threshold < upper)
         self.assertEqual(_midpoint(5.0, 7.0), 6.0)
 
+
+class TestValidation(unittest.TestCase):
+    def setUp(self):
+        self.X, self.y = _separable_data(50)
+
+    def test_invalid_hyperparameters(self):
+        bad = [
+            dict(criterion="foo"),
+            dict(buffer_size=0),
+            dict(max_depth=0),
+            dict(min_samples_split=1),
+            dict(min_samples_leaf=0),
+            dict(max_features=1.5),
+            dict(max_features="half"),
+            dict(max_features=10),
+        ]
+        for params in bad:
+            with self.subTest(params=params):
+                with self.assertRaises(ValueError):
+                    DecisionTreeClassifier(**params).fit(self.X, self.y)
+
+    def test_wrong_hyperparameter_types(self):
+        for params in (dict(max_depth=2.5), dict(max_features=True),
+                       dict(criterion=1), dict(buffer_size="10")):
+            with self.subTest(params=params):
+                with self.assertRaises(TypeError):
+                    DecisionTreeClassifier(**params).fit(self.X, self.y)
+
+    def test_nan_and_inf_rejected(self):
+        X = self.X.copy()
+        X[0, 0] = np.nan
+        with self.assertRaises(ValueError):
+            DecisionTreeClassifier().fit(X, self.y)
+        X[0, 0] = np.inf
+        with self.assertRaises(ValueError):
+            DecisionTreeClassifier().fit(X, self.y)
+
+    def test_shape_errors(self):
+        tree = DecisionTreeClassifier()
+        with self.assertRaises(ValueError):
+            tree.fit(self.X, self.y[:-1])  # length mismatch
+        with self.assertRaises(ValueError):
+            tree.fit(self.X[:, 0], self.y)  # 1D X
+        with self.assertRaises(ValueError):
+            tree.fit(np.empty((0, 4)), [])  # no samples
+        with self.assertRaises(ValueError):
+            tree.fit(self.X, np.c_[self.y, self.y])  # 2D y
+
+    def test_column_vector_y_accepted(self):
+        tree = DecisionTreeClassifier().fit(self.X, self.y.reshape(-1, 1))
+        self.assertEqual(tree.predict(self.X).shape, (50,))
+
+    def test_nan_label_rejected(self):
+        y = self.y.astype(float)
+        y[3] = np.nan
+        with self.assertRaises(ValueError):
+            DecisionTreeClassifier().fit(self.X, y)
+
+    def test_predict_feature_mismatch(self):
+        tree = DecisionTreeClassifier().fit(self.X, self.y)
+        with self.assertRaises(ValueError):
+            tree.predict(self.X[:, :2])
+
 if __name__ == "__main__":
     unittest.main()

@@ -111,7 +111,8 @@ def _midpoint(lower, upper):
 
 def _sorted_feature(x, y_encoded):
     """Sort one feature column and its labels together (stable sort)."""
-    raise NotImplementedError
+    order = np.argsort(x, kind="stable")
+    return x[order], y_encoded[order]
 
 
 def _best_split_feature(x, y_encoded, n_classes, impurity_fn,

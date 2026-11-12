@@ -192,5 +192,48 @@ class TestStreamingAUC(unittest.TestCase):
         with self.assertRaises(ValueError):
             StreamingAUC().update([0, 1, 1], [0.5, 0.2])
 
+
+class TestRollingWindowMetric(unittest.TestCase):
+    def test_only_recent_samples_count(self):
+        rolling = RollingWindowMetric(StreamingAccuracy(), window_size=4)
+        rolling.update([0, 0, 0, 0], [1, 1, 1, 1])  # all wrong
+        self.assertEqual(rolling.result(), 0.0)
+        rolling.update([1, 1], [1, 1])  # window: 2 wrong, 2 right
+        self.assertEqual(rolling.result(), 0.5)
+        rolling.update([1, 1], [1, 1])  # window: 4 right
+        self.assertEqual(rolling.result(), 1.0)
+        self.assertEqual(rolling.n_samples_, 4)
+
+    def test_works_with_other_metrics(self):
+        rolling = RollingWindowMetric(StreamingF1(average="macro"), 100)
+        rolling.update([0, 1, 2], [0, 1, 1])
+        assert_allclose(rolling.result(),
+                        f1([0, 1, 2], [0, 1, 1], average="macro"))
+        auc = RollingWindowMetric(StreamingAUC(), 2)
+        auc.update([1, 0], [0.1, 0.9]).update([0, 1], [0.1, 0.9])
+        self.assertEqual(auc.result(), 1.0)
+
+    def test_template_metric_not_modified(self):
+        template = StreamingAccuracy()
+        RollingWindowMetric(template, 5).update([0, 1], [0, 1]).result()
+        self.assertEqual(template.n_samples_, 0)
+
+    def test_invalid_chunk_not_stored(self):
+        rolling = RollingWindowMetric(StreamingAccuracy(), 5)
+        with self.assertRaises(ValueError):
+            rolling.update([0, 1], [0])
+        self.assertEqual(rolling.n_samples_, 0)
+
+    def test_bad_arguments_and_reset(self):
+        with self.assertRaises(TypeError):
+            RollingWindowMetric(accuracy, 5)
+        with self.assertRaises(ValueError):
+            RollingWindowMetric(StreamingAccuracy(), 0)
+        rolling = RollingWindowMetric(StreamingAccuracy(), 3)
+        rolling.update([1], [1]).reset()
+        with self.assertRaises(RuntimeError):
+            rolling.result()
+
+
 if __name__ == "__main__":
     unittest.main()

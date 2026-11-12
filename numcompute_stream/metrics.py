@@ -830,3 +830,24 @@ def _score_from_matrix(matrix, labels, metric, average, pos_label,
 
     support = matrix.sum(axis=1).astype(np.float64)
     return float(np.sum(per_class * support) / np.sum(support))
+
+
+class _ConfusionMatrixMetric(StreamingMetric):
+    """Base for metrics computed from an accumulated confusion matrix."""
+
+    def __init__(self, labels=None):
+        self._confusion = StreamingConfusionMatrix(labels=labels)
+        super().__init__()
+
+    def _reset_state(self):
+        self._confusion.reset()
+
+    def _update(self, y_true, y_pred):
+        before = self._confusion.n_samples_
+        self._confusion.update(y_true, y_pred)
+        return self._confusion.n_samples_ - before
+
+    @property
+    def confusion_matrix_(self):
+        """The accumulated ``StreamingConfusionMatrix``."""
+        return self._confusion

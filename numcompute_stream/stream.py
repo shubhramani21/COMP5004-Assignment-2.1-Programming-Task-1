@@ -218,6 +218,33 @@ class StreamTrainer:
         return self._stage({"scored": True, "chunk_accuracy": chunk_accuracy,
                             "predict_time": predict_time})
 
+    def fit_chunk(self, X, y):
+        """Train the model on one chunk with ``partial_fit``.
+
+        Returns
+        -------
+        dict
+            "fit_time", "retrained" (True if the model retrained during
+            this call, None if the model does not report retrains),
+            "n_retrains", "buffer_count" and "model_bytes".
+        """
+        estimator = _final_estimator(self.model)
+        before = getattr(estimator, "n_retrains_", None)
+
+        start = time.perf_counter()
+        self.model.partial_fit(X, y)
+        fit_time = time.perf_counter() - start
+
+        after = getattr(estimator, "n_retrains_", None)
+        return self._stage({
+            "fit_time": fit_time,
+            "retrained": None if after is None else bool(after != before),
+            "n_retrains": np.nan if after is None else after,
+            "buffer_count": getattr(estimator, "buffer_count_", np.nan),
+            "model_bytes": (estimate_nbytes(self.model)
+                            if self.track_memory else np.nan),
+        })
+
     # -- helpers ------------------------------------------------------------
 
     def _positive_scores(self, X):

@@ -6,3 +6,6 @@ build/
 dist/
 .ipynb_checkpoints/
 .env
+# Assignment brief (local reference only)
+Assignment 2.2_ Programming Task 2.md
+Assignment2.2-specs.md

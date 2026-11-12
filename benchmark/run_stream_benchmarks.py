@@ -149,3 +149,26 @@ def bench_tree_predict(sizes, repeats):
                          benchmark(loop_tree_predict, tree, X, repeats=repeats),
                          benchmark(tree.predict, X, repeats=repeats)))
     return rows
+
+
+def bench_scaler(sizes, repeats, chunk_size=100):
+    """Running mean/std: per-sample Welford loop vs chunk merge."""
+    rows = []
+    for n in sizes:
+        X, _ = make_stream_data(n, seed=n + 3)
+        chunks = [X[i:i + chunk_size] for i in range(0, n, chunk_size)]
+
+        def vectorised():
+            scaler = StandardScaler()
+            for chunk in chunks:
+                scaler.partial_fit(chunk)
+            return scaler.mean_, scaler.scale_
+
+        loop_mean, loop_std = loop_welford(chunks)
+        fast_mean, fast_std = vectorised()
+        assert_allclose(fast_mean, loop_mean)
+        assert_allclose(fast_std, loop_std)
+        rows.append(_row("scaler_partial_fit", n,
+                         benchmark(loop_welford, chunks, repeats=repeats),
+                         benchmark(vectorised, repeats=repeats)))
+    return rows

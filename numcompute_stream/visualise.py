@@ -133,3 +133,59 @@ def compare_models(metric1, metric2, labels=("Model 1", "Model 2"),
     ax.plot(np.arange(second.size), second, marker="s", markersize=3,
             label=labels[1])
     return _finish(fig, ax, title, xlabel, ylabel, save_path, show, True)
+
+
+def plot_predictions_vs_ground_truth(y_true, y_pred,
+                                     title="Predictions vs ground truth",
+                                     ax=None, save_path=None, show=False,
+                                     figsize=(8, 4)):
+    """Show true and predicted labels for each sample of a chunk.
+
+    True labels are drawn as circles and predictions as crosses; wrongly
+    predicted samples are highlighted in red. Works for numeric or string
+    class labels. The chunk accuracy is added to the title.
+
+    Parameters
+    ----------
+    y_true, y_pred : array-like, shape (n_samples,)
+
+    Returns
+    -------
+    (matplotlib.figure.Figure, matplotlib.axes.Axes)
+    """
+    true = np.asarray(y_true)
+    pred = np.asarray(y_pred)
+    if true.ndim != 1 or pred.ndim != 1:
+        raise ValueError("y_true and y_pred must be 1D.")
+    if true.shape != pred.shape:
+        raise ValueError("y_true and y_pred must have equal lengths.")
+    if true.size == 0:
+        raise ValueError("y_true and y_pred must not be empty.")
+    # NumPy would silently turn numbers into strings when mixed.
+    if (true.dtype.kind in "US") != (pred.dtype.kind in "US"):
+        raise TypeError("y_true and y_pred must use the same label type.")
+
+    try:
+        classes = np.unique(np.concatenate((true, pred)))
+    except TypeError as exc:
+        raise TypeError("y_true and y_pred must use the same label type.") from exc
+    true_index = np.searchsorted(classes, true)
+    pred_index = np.searchsorted(classes, pred)
+    wrong = true_index != pred_index
+    samples = np.arange(true.size)
+
+    fig, ax = _get_axes(ax, figsize)
+    ax.scatter(samples, true_index, marker="o", facecolors="none",
+               edgecolors="tab:blue", label="ground truth")
+    ax.scatter(samples[~wrong], pred_index[~wrong], marker="x",
+               color="tab:green", label="correct prediction")
+    if np.any(wrong):
+        ax.scatter(samples[wrong], pred_index[wrong], marker="x",
+                   color="tab:red", label="wrong prediction")
+    ax.set_yticks(np.arange(classes.size))
+    ax.set_yticklabels([str(c) for c in classes])
+
+    accuracy = 1.0 - wrong.mean()
+    full_title = f"{title} (accuracy {accuracy:.1%})"
+    return _finish(fig, ax, full_title, "Sample", "Class", save_path, show,
+                   True)

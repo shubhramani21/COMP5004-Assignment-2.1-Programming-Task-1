@@ -156,5 +156,71 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             tree.predict(self.X[:, :2])
 
+
+class TestFitPredict(unittest.TestCase):
+    def test_separable_data_fits_perfectly(self):
+        X, y = _separable_data()
+        tree = DecisionTreeClassifier().fit(X, y)
+        self.assertEqual(tree.score(X, y), 1.0)
+        self.assertEqual(tree.n_retrains_, 1)
+
+    def test_xor_needs_zero_gain_split(self):
+        X = np.array([[0, 0], [0, 1], [1, 0], [1, 1.0]])
+        y = np.array([0, 1, 1, 0])
+        tree = DecisionTreeClassifier().fit(X, y)
+        assert_array_equal(tree.predict(X), y)
+
+    def test_max_depth_limits_tree(self):
+        X, y = _separable_data()
+        for depth in (1, 2, 3):
+            tree = DecisionTreeClassifier(max_depth=depth).fit(X, y)
+            self.assertLessEqual(tree.get_depth(), depth)
+
+    def test_min_samples_split_stops_growth(self):
+        X, y = _separable_data(20)
+        tree = DecisionTreeClassifier(min_samples_split=50).fit(X, y)
+        self.assertEqual(tree.get_n_leaves(), 1)
+
+    def test_string_labels_and_entropy(self):
+        X, y = _separable_data()
+        labels = np.where(y == 1, "yes", "no")
+        tree = DecisionTreeClassifier(criterion="entropy").fit(X, labels)
+        assert_array_equal(tree.classes_, ["no", "yes"])
+        self.assertEqual(tree.score(X, labels), 1.0)
+
+    def test_predict_proba_rows_sum_to_one(self):
+        X, y = _separable_data()
+        proba = DecisionTreeClassifier(max_depth=2).fit(X, y).predict_proba(X)
+        self.assertEqual(proba.shape, (300, 2))
+        assert_allclose(proba.sum(axis=1), 1.0)
+        self.assertTrue(np.all((proba >= 0) & (proba <= 1)))
+
+    def test_single_class_gives_single_leaf(self):
+        X, _ = _separable_data(30)
+        tree = DecisionTreeClassifier().fit(X, np.full(30, 7))
+        self.assertEqual(tree.get_n_leaves(), 1)
+        assert_array_equal(tree.predict(X[:3]), [7, 7, 7])
+
+    def test_zero_variance_features_give_single_leaf(self):
+        tree = DecisionTreeClassifier().fit(np.ones((10, 3)),
+                                            [0, 1] * 5)
+        self.assertEqual(tree.get_n_leaves(), 1)
+        self.assertEqual(tree.get_depth(), 0)
+
+    def test_tie_goes_to_first_class(self):
+        tree = DecisionTreeClassifier().fit(np.ones((4, 1)), [1, 0, 1, 0])
+        assert_array_equal(tree.predict([[1.0]]), [0])
+
+    def test_max_features_reproducible(self):
+        X, y = _separable_data()
+        a = DecisionTreeClassifier(max_features="sqrt", random_state=3)
+        b = DecisionTreeClassifier(max_features="sqrt", random_state=3)
+        assert_array_equal(a.fit(X, y).predict(X), b.fit(X, y).predict(X))
+
+    def test_predict_empty_input(self):
+        X, y = _separable_data()
+        tree = DecisionTreeClassifier().fit(X, y)
+        self.assertEqual(tree.predict(np.empty((0, 4))).shape, (0,))
+
 if __name__ == "__main__":
     unittest.main()

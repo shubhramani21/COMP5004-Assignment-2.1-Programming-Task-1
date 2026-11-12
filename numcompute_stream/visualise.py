@@ -58,3 +58,47 @@ def _finish(fig, ax, title, xlabel, ylabel, save_path, show, legend):
     if show:
         plt.show()
     return fig, ax
+
+
+def plot_metric_over_time(metric_values, title="Metric over time",
+                          ylabel="Value", xlabel="Chunk", label=None,
+                          marks=None, ax=None, save_path=None, show=False,
+                          figsize=(8, 4)):
+    """Plot a metric (e.g. accuracy) across chunks.
+
+    Parameters
+    ----------
+    metric_values : array-like, shape (n_chunks,) or dict of name -> array
+        One series, or several named series drawn on the same axes.
+        NaN values (e.g. chunks before the first training) leave gaps.
+    title, ylabel, xlabel : str
+    label : str or None
+        Legend label for a single series.
+    marks : array-like of int or None
+        Chunk indices to highlight with vertical dashed lines, e.g. the
+        chunks where the tree retrained.
+    ax, save_path, show, figsize
+        See the module docstring.
+
+    Returns
+    -------
+    (matplotlib.figure.Figure, matplotlib.axes.Axes)
+    """
+    series = (metric_values if isinstance(metric_values, dict)
+              else {label: metric_values})
+    if not series:
+        raise ValueError("metric_values must not be empty.")
+
+    fig, ax = _get_axes(ax, figsize)
+    for name, values in series.items():
+        values = _as_series(values, "metric_values")
+        ax.plot(np.arange(values.size), values, marker="o", markersize=3,
+                label=name)
+
+    if marks is not None:
+        for index, chunk in enumerate(np.asarray(marks).ravel()):
+            ax.axvline(chunk, color="grey", linestyle="--", linewidth=0.8,
+                       alpha=0.6, label="retrain" if index == 0 else None)
+
+    legend = any(name is not None for name in series) or marks is not None
+    return _finish(fig, ax, title, xlabel, ylabel, save_path, show, legend)

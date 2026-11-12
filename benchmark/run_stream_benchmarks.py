@@ -311,3 +311,51 @@ def _fmt(value):
     if isinstance(value, float):
         return f"{value:.4g}"
     return str(value)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--quick", action="store_true",
+                        help="smaller sizes and one seed (for a fast check)")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="results folder (default: timestamped folder)")
+    args = parser.parse_args(argv)
+
+    if args.quick:
+        sizes, repeats, seeds = [100, 400], 2, [0]
+        buffer_sizes, n_samples = [100, 400, 1600], 4000
+    else:
+        sizes, repeats, seeds = [100, 500, 1000, 2000], 5, [0, 1, 2]
+        buffer_sizes, n_samples = [100, 250, 500, 1000, 2000, 4000], 20000
+    chunk_size = 100
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    folder = args.output or RESULTS_DIR / f"stream_{stamp}"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    print("Part A: loop vs vectorised (outputs verified equal)")
+    vector_rows = (bench_split_search(sizes, repeats)
+                   + bench_tree_fit(sizes[:3], max(2, repeats // 2))
+                   + bench_tree_predict(sizes, repeats)
+                   + bench_scaler(sizes, repeats)
+                   + bench_confusion(sizes, repeats))
+    print_table(vector_rows)
+
+    print(f"\nPart B: buffer_size ({n_samples} samples, chunks of "
+          f"{chunk_size}, mean of {len(seeds)} seed(s))")
+    buffer_rows, curves = bench_buffer_sizes(
+        buffer_sizes, n_samples, chunk_size, seeds, drift_at=n_samples // 2)
+    print_table(buffer_rows)
+
+    write_csv(folder / "vectorisation.csv", vector_rows)
+    write_csv(folder / "buffer_size.csv", buffer_rows)
+    with open(folder / "environment.json", "w") as handle:
+        json.dump(environment_info(), handle, indent=2, default=str)
+    plot_vectorisation(vector_rows, folder / "vectorisation.png")
+    plot_buffer_sizes(buffer_rows, curves, buffer_sizes, folder)
+    print(f"\nResults written to {folder}")
+    return folder
+
+
+if __name__ == "__main__":
+    main()

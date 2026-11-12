@@ -50,3 +50,16 @@ def loop_welford(chunks):
                 m2[j] += delta * (row[j] - mean[j])
     std = [np.sqrt(value / count) for value in m2]
     return np.asarray(mean), np.asarray(std)
+
+
+def loop_confusion_matrix(chunks, n_classes):
+    """Accumulate a confusion matrix one (true, predicted) pair at a time.
+
+    Equivalent to ``StreamingConfusionMatrix`` with labels 0..n_classes-1,
+    which counts each chunk with a single ``np.bincount`` call.
+    """
+    matrix = np.zeros((n_classes, n_classes), dtype=np.int64)
+    for y_true, y_pred in chunks:
+        for actual, predicted in zip(y_true, y_pred):
+            matrix[int(actual), int(predicted)] += 1
+    return matrix

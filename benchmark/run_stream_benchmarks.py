@@ -172,3 +172,26 @@ def bench_scaler(sizes, repeats, chunk_size=100):
                          benchmark(loop_welford, chunks, repeats=repeats),
                          benchmark(vectorised, repeats=repeats)))
     return rows
+
+
+def bench_confusion(sizes, repeats, chunk_size=100):
+    """Streaming confusion matrix: per-pair loop vs bincount per chunk."""
+    rows = []
+    for n in sizes:
+        rng = np.random.default_rng(n)
+        y_true = rng.integers(0, 4, n)
+        y_pred = rng.integers(0, 4, n)
+        chunks = list(iter_chunks(y_true, y_pred, chunk_size))
+
+        def vectorised():
+            cm = StreamingConfusionMatrix(labels=[0, 1, 2, 3])
+            for t, p in chunks:
+                cm.update(t, p)
+            return cm.matrix_
+
+        assert_array_equal(vectorised(), loop_confusion_matrix(chunks, 4))
+        rows.append(_row("confusion_matrix", n,
+                         benchmark(loop_confusion_matrix, chunks, 4,
+                                   repeats=repeats),
+                         benchmark(vectorised, repeats=repeats)))
+    return rows

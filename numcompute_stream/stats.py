@@ -1066,3 +1066,81 @@ class _P2Estimator:
             return float(np.quantile(self.initial, self.p))
         return float(self.heights[2])
 
+
+class StreamingQuantile:
+    """Estimate quantiles of a 1D stream with the P-squared algorithm.
+
+    Parameters
+    ----------
+    q : float or sequence of float
+        Quantile levels in [0, 1], e.g. ``0.5`` or ``[0.25, 0.5, 0.75]``.
+        Levels 0 and 1 are tracked exactly as the running min and max.
+    nan_policy : {"omit", "raise"}, default="omit"
+
+    Notes
+    -----
+    P-squared stores 5 markers per level, so memory is O(len(q)) however
+    long the stream is. Results are approximate (exact for the first five
+    values); accuracy improves with more data. Each value updates the
+    markers in sequence, so values are processed in a Python loop: the
+    algorithm is inherently sequential.
+
+    Examples
+    --------
+    >>> sq = StreamingQuantile([0.5])
+    >>> sq.update([1, 2, 3]).update([4, 5]).result()
+    array([3.])
+    """
+
+    def __init__(self, q=0.5, nan_policy="omit"):
+        self.q = _validate_quantile_levels(q)
+        nan_policy = _validate_nan_policy(nan_policy)
+        if nan_policy == "propagate":
+            raise ValueError("StreamingQuantile supports nan_policy "
+                             "'omit' or 'raise'.")
+        self.nan_policy = nan_policy
+        self.reset()
+
+    def reset(self):
+        """Forget all values. Returns self."""
+        self.count = 0
+        self._min = np.inf
+        self._max = -np.inf
+        self._estimators = [_P2Estimator(p) for p in self.q
+                            if 0.0 < p < 1.0]
+        return self
+
+    def update(self, values):
+        """Add a 1D chunk of values. Returns self."""
+        array, _, _, nan_mask = _prepare_reduction(values, None,
+                                                   self.nan_policy)
+        if array.ndim != 1:
+            raise ValueError("values must be a 1D array.")
+        clean = array[~nan_mask]
+        if clean.size == 0:
+            return self
+
+        # np.minimum/np.maximum: this module defines its own min and max.
+        self._min = float(np.minimum(self._min, clean.min()))
+        self._max = float(np.maximum(self._max, clean.max()))
+        for x in clean.tolist():
+            for estimator in self._estimators:
+                estimator.add(x)
+        self.count += int(clean.size)
+        return self
+
+    def result(self):
+        """Current estimates, shape (len(q),). NaN before any data."""
+        if self.count == 0:
+            return np.full(self.q.shape, np.nan)
+        estimates = iter([e.estimate() for e in self._estimators])
+        out = []
+        for p in self.q:
+            if p == 0.0:
+                out.append(self._min)
+            elif p == 1.0:
+                out.append(self._max)
+            else:
+                out.append(next(estimates))
+        return np.asarray(out, dtype=np.float64)
+

@@ -685,7 +685,9 @@ class DecisionTreeClassifier:
         float
             Accuracy in [0, 1].
         """
-        raise NotImplementedError
+        X = self._validate_X_predict(X)
+        _, y = self._validate_X_y(X, y)
+        return float(np.mean(self.predict(X) == y))
 
     # -- introspection ------------------------------------------------------
 

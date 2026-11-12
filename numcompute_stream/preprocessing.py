@@ -489,6 +489,12 @@ class OneHotEncoder:
     Each input column contains strings or real numeric categories.
     None and numeric NaN represent the same missing category.
     Output is a dense float64 array.
+
+    Streaming: partial_fit appends categories not seen before to the end
+    of each column's list, so the output gains columns over time. Existing
+    output columns keep their position only within a column's block;
+    later blocks shift right. Fit on a representative first chunk, or call
+    fit with all categories, when downstream models need a fixed width.
     """
 
     def __init__(self, handle_unknown="error"):
@@ -576,34 +582,79 @@ class OneHotEncoder:
         """
         option = self._validate_option()
         array = self._validate_input(X, fitting=True)
+        n_features = array.shape[1]
+        self._learn(array, [{} for _ in range(n_features)],
+                    [[] for _ in range(n_features)],
+                    [None] * n_features, option)
+        return self
 
-        categories = []
-        mappings = []
+    def partial_fit(self, X, y=None):
+        """Add categories not seen before; return self.
 
+        X has shape (n_chunk, n_features); zero rows are allowed and the
+        column count must match earlier chunks. A column may not switch
+        between string and numeric categories across chunks. A failed call
+        keeps the previous state.
+        """
+        option = self._validate_option()
+        array = self._validate_input(X)
+        if array.shape[1] == 0:
+            raise ValueError("X must have at least one feature.")
+
+        if hasattr(self, "n_features_in_"):
+            if array.shape[1] != self.n_features_in_:
+                raise ValueError(
+                    f"X must have {self.n_features_in_} features; "
+                    f"got {array.shape[1]}."
+                )
+            mappings = [dict(mapping) for mapping in self._mappings]
+            values = [list(column) for column in self.categories_]
+            kinds = list(self._column_kinds)
+        else:
+            n_features = array.shape[1]
+            mappings = [{} for _ in range(n_features)]
+            values = [[] for _ in range(n_features)]
+            kinds = [None] * n_features
+
+        self._learn(array, mappings, values, kinds, option)
+        return self
+
+    def _learn(self, array, mappings, values, kinds, option):
+        """Extend per-column category lists with array, then commit."""
         for column in range(array.shape[1]):
-            mapping = {}
-            values = []
+            mapping = mappings[column]
+            column_values = values[column]
 
             for key in array[:, column]:
+                if key is not None:
+                    kind = "string" if isinstance(key, str) else "numeric"
+                    if kinds[column] is None:
+                        kinds[column] = kind
+                    elif kinds[column] != kind:
+                        raise TypeError(
+                            f"Column {column} must not mix strings and numbers."
+                        )
                 if key not in mapping:
-                    mapping[key] = len(values)
-                    values.append(key)
+                    mapping[key] = len(column_values)
+                    column_values.append(key)
 
-            categories.append(np.array(values, dtype=object))
-            mappings.append(mapping)
-
-        widths = [len(values) for values in categories]
+        widths = [len(column_values) for column_values in values]
         offsets = np.cumsum([0] + widths[:-1], dtype=np.intp)
 
-        self.categories_ = categories
+        self.categories_ = [np.array(column_values, dtype=object)
+                            for column_values in values]
         self.n_features_in_ = array.shape[1]
 
         self._mappings = mappings
+        self._column_kinds = kinds
         self._offsets = offsets
         self._n_output_features = sum(widths)
         self._handle_unknown = option
 
-        return self
+    @property
+    def n_features_out_(self):
+        """Number of output columns produced by transform."""
+        return self._n_output_features
 
     def transform(self, X):
         """Encode 2D input using previously learned categories.

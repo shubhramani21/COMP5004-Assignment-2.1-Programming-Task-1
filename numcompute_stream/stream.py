@@ -245,6 +245,20 @@ class StreamTrainer:
                             if self.track_memory else np.nan),
         })
 
+    def process_chunk(self, X, y):
+        """Test-then-train on one chunk and log the results.
+
+        Returns
+        -------
+        dict
+            The log entry for this chunk (also appended to ``history_``).
+        """
+        n_samples = len(y)
+        self.score_chunk(X, y)
+        self.fit_chunk(X, y)
+        self.n_samples_seen_ += n_samples
+        return self._log(n_samples)
+
     # -- helpers ------------------------------------------------------------
 
     def _positive_scores(self, X):
@@ -278,3 +292,32 @@ class StreamTrainer:
         if metric is None or metric.n_samples_ == 0:
             return np.nan
         return metric.result()
+
+    def _log(self, n_samples):
+        entry = {
+            "chunk": self.n_chunks_, "n_samples": n_samples,
+            "scored": False, "chunk_accuracy": np.nan, "predict_time": np.nan,
+            "fit_time": np.nan, "retrained": None, "n_retrains": np.nan,
+            "buffer_count": np.nan, "model_bytes": np.nan,
+        }
+        entry.update(self._pending or {})
+        entry.update(self._cumulative())
+        self._pending = None
+        self.history_.append(entry)
+        self.n_chunks_ += 1
+
+        if self.verbose:
+            print(self._format(entry))
+        return entry
+
+    @staticmethod
+    def _format(entry):
+        def pct(value):
+            return "   -  " if np.isnan(value) else f"{value:6.1%}"
+        retrained = " retrained" if entry["retrained"] else ""
+        memory = ("" if np.isnan(entry["model_bytes"]) else
+                  f" mem={entry['model_bytes'] / 1024:7.1f}KB")
+        return (f"chunk {entry['chunk']:4d} | n={entry['n_samples']:5d} | "
+                f"acc={pct(entry['chunk_accuracy'])} | "
+                f"cum={pct(entry['cumulative_accuracy'])} | "
+                f"fit={entry['fit_time'] * 1000:7.2f}ms{memory}{retrained}")

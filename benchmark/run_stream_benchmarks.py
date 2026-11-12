@@ -232,3 +232,82 @@ def bench_buffer_sizes(buffer_sizes, n_samples, chunk_size, seeds, drift_at):
                 row[key] = float(np.mean([r[key] for r in per_seed]))
             rows.append(row)
     return rows, curves
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+def write_csv(path, rows):
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def plot_vectorisation(rows, path):
+    components = list(dict.fromkeys(row["component"] for row in rows))
+    fig, axes = plt.subplots(1, len(components),
+                             figsize=(3.6 * len(components), 3.4))
+    for ax, component in zip(np.atleast_1d(axes), components):
+        subset = [row for row in rows if row["component"] == component]
+        sizes = [row["size"] for row in subset]
+        ax.loglog(sizes, [row["loop_seconds"] for row in subset], "o-",
+                  label="loop")
+        ax.loglog(sizes, [row["vectorised_seconds"] for row in subset], "s-",
+                  label="vectorised")
+        ax.set_title(component)
+        ax.set_xlabel("samples")
+        ax.grid(True, alpha=0.3, which="both")
+    np.atleast_1d(axes)[0].set_ylabel("median seconds")
+    np.atleast_1d(axes)[0].legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_buffer_sizes(rows, curves, buffer_sizes, folder):
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
+    for scenario, marker in (("stationary", "o-"), ("drift", "s--")):
+        subset = [row for row in rows if row["scenario"] == scenario]
+        sizes = [row["buffer_size"] for row in subset]
+        axes[0].plot(sizes, [row["accuracy"] for row in subset], marker,
+                     label=scenario)
+        axes[1].plot(sizes, [row["mean_retrain_seconds"] * 1000
+                             for row in subset], marker, label=scenario)
+        axes[2].plot(sizes, [row["n_retrains"] for row in subset], marker,
+                     label=scenario)
+    titles = ("Prequential accuracy", "Mean retrain time (ms)",
+              "Number of retrains")
+    for ax, title in zip(axes, titles):
+        ax.set_xscale("log")
+        ax.set_xlabel("buffer_size")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    fig.tight_layout()
+    fig.savefig(folder / "buffer_size_tradeoff.png", dpi=150)
+    plt.close(fig)
+
+    small, large = buffer_sizes[0], buffer_sizes[-1]
+    for scenario in ("stationary", "drift"):
+        fig, _ = compare_models(
+            curves[(scenario, small)], curves[(scenario, large)],
+            labels=[f"buffer_size={small}", f"buffer_size={large}"],
+            title=f"Per-chunk accuracy ({scenario})", ylabel="Accuracy",
+            save_path=folder / f"compare_buffers_{scenario}.png")
+        plt.close(fig)
+
+
+def print_table(rows):
+    keys = list(rows[0])
+    widths = [max(len(k), *(len(_fmt(r[k])) for r in rows)) for k in keys]
+    print("  ".join(k.ljust(w) for k, w in zip(keys, widths)))
+    for row in rows:
+        print("  ".join(_fmt(row[k]).ljust(w) for k, w in zip(keys, widths)))
+
+
+def _fmt(value):
+    if isinstance(value, float):
+        return f"{value:.4g}"
+    return str(value)

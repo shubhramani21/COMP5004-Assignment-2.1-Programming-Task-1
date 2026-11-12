@@ -481,7 +481,22 @@ class DecisionTreeClassifier:
 
     def _fit(self, X, y):
         """Train on already-validated data."""
-        raise NotImplementedError
+        start = time.perf_counter()
+
+        self.classes_, y_encoded = np.unique(y, return_inverse=True)
+        y_encoded = y_encoded.ravel()
+        self.n_features_in_ = X.shape[1]
+        self._n_classes = self.classes_.shape[0]
+        self._impurity_fn = _CRITERIA[self.criterion]
+        self._n_split_features = self._resolve_max_features(X.shape[1])
+        if self._rng is None:
+            self._rng = np.random.default_rng(self.random_state)
+
+        self.root_ = self._build(X, y_encoded, 0, self._rng)
+
+        self.n_retrains_ += 1
+        self.last_train_size_ = X.shape[0]
+        self.last_train_time_ = time.perf_counter() - start
 
     def _best_split(self, X, y_encoded, rng):
         """Search the (sub-sampled) features for the best split.

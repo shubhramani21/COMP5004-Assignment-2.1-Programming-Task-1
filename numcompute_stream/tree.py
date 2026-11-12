@@ -343,7 +343,50 @@ class DecisionTreeClassifier:
 
     def _validate_params(self):
         """Check hyperparameters; raise TypeError/ValueError if invalid."""
-        raise NotImplementedError
+        if self.max_depth is not None:
+            _validate_integer(self.max_depth, name="max_depth", minimum=1)
+        _validate_integer(self.min_samples_split,
+                          name="min_samples_split", minimum=2)
+        _validate_integer(self.min_samples_leaf,
+                          name="min_samples_leaf", minimum=1)
+        _validate_integer(self.buffer_size, name="buffer_size", minimum=1)
+
+        if not isinstance(self.criterion, str):
+            raise TypeError("criterion must be a string.")
+        if self.criterion not in _CRITERIA:
+            raise ValueError(
+                f"criterion must be one of {sorted(_CRITERIA)}; "
+                f"got {self.criterion!r}."
+            )
+
+        mf = self.max_features
+        if mf is None:
+            pass
+        elif isinstance(mf, str):
+            if mf not in ("sqrt", "log2"):
+                raise ValueError(
+                    "max_features string must be 'sqrt' or 'log2'; "
+                    f"got {mf!r}."
+                )
+        elif isinstance(mf, (bool, np.bool_)):
+            raise TypeError("max_features must not be a boolean.")
+        elif isinstance(mf, Integral):
+            _validate_integer(mf, name="max_features", minimum=1)
+        elif isinstance(mf, Real):
+            if not 0.0 < float(mf) <= 1.0:
+                raise ValueError(
+                    "max_features as a float must be in (0, 1]; "
+                    f"got {mf!r}."
+                )
+        else:
+            raise TypeError(
+                "max_features must be None, an int, a float, "
+                "'sqrt' or 'log2'."
+            )
+
+        if self.random_state is not None:
+            _validate_integer(self.random_state, name="random_state",
+                              minimum=0)
 
     @staticmethod
     def _validate_X_y(X, y, *, n_features=None, allow_empty=False):

@@ -603,7 +603,13 @@ class DecisionTreeClassifier:
 
     def _check_is_fitted(self):
         """Raise ``RuntimeError`` if no tree has been trained yet."""
-        raise NotImplementedError
+        if self.root_ is None:
+            raise RuntimeError(
+                "DecisionTreeClassifier is not trained yet. Call fit(), or "
+                "keep calling partial_fit() until buffer_size="
+                f"{self.buffer_size} samples are buffered "
+                f"(currently {self._buffer_count})."
+            )
 
     def _leaf_values(self, X):
         """Return the leaf class counts reached by each row of ``X``.

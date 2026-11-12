@@ -728,4 +728,11 @@ class DecisionTreeClassifier:
 
     def get_n_leaves(self):
         """Number of leaves in the trained tree."""
-        raise NotImplementedError
+        self._check_is_fitted()
+
+        def leaves(node):
+            if node.is_leaf:
+                return 1
+            return leaves(node.left) + leaves(node.right)
+
+        return leaves(self.root_)

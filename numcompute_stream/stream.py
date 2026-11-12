@@ -259,6 +259,18 @@ class StreamTrainer:
         self.n_samples_seen_ += n_samples
         return self._log(n_samples)
 
+    def run(self, stream):
+        """Process every ``(X_chunk, y_chunk)`` pair of an iterable.
+
+        Returns
+        -------
+        list of dict
+            ``history_``.
+        """
+        for X_chunk, y_chunk in stream:
+            self.process_chunk(X_chunk, y_chunk)
+        return self.history_
+
     # -- helpers ------------------------------------------------------------
 
     def _positive_scores(self, X):

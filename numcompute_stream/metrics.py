@@ -912,3 +912,12 @@ class StreamingRecall(_AveragedMetric):
     """
 
     _metric = "recall"
+
+
+class StreamingF1(_AveragedMetric):
+    """Cumulative F1 ``2TP / (2TP + FP + FN)`` over a stream.
+
+    Same parameters as ``StreamingPrecision``.
+    """
+
+    _metric = "f1"

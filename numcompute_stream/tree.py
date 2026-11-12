@@ -103,7 +103,10 @@ def _midpoint(lower, upper):
     to ``lower`` when floating-point rounding makes the midpoint equal to
     ``upper`` (adjacent floats), so ``x <= threshold`` still separates them.
     """
-    raise NotImplementedError
+    threshold = lower + (upper - lower) / 2.0
+    if threshold >= upper:
+        threshold = lower
+    return float(threshold)
 
 
 def _sorted_feature(x, y_encoded):

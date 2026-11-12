@@ -496,7 +496,24 @@ class DecisionTreeClassifier:
             ``(feature_index, threshold)`` or None if no feature has a
             valid split. Ties go to the lowest feature index.
         """
-        raise NotImplementedError
+        n_features = X.shape[1]
+        if self._n_split_features < n_features:
+            features = np.sort(rng.choice(n_features, self._n_split_features,
+                                          replace=False))
+        else:
+            features = np.arange(n_features)
+
+        best_score = np.inf
+        best = None
+        for feature in features:
+            result = _best_split_feature(
+                X[:, feature], y_encoded, self._n_classes,
+                self._impurity_fn, self.min_samples_leaf,
+            )
+            if result is not None and result[0] < best_score:
+                best_score = result[0]
+                best = (int(feature), result[1])
+        return best
 
     def _build(self, X, y_encoded, depth, rng):
         """Recursively grow the tree and return the root ``_Node``.

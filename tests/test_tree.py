@@ -222,5 +222,75 @@ class TestFitPredict(unittest.TestCase):
         tree = DecisionTreeClassifier().fit(X, y)
         self.assertEqual(tree.predict(np.empty((0, 4))).shape, (0,))
 
+
+class TestStreaming(unittest.TestCase):
+    def setUp(self):
+        self.X, self.y = _separable_data()
+
+    def test_predict_before_first_retrain_raises(self):
+        tree = DecisionTreeClassifier(buffer_size=100)
+        tree.partial_fit(self.X[:30], self.y[:30])
+        with self.assertRaisesRegex(RuntimeError, "not trained yet"):
+            tree.predict(self.X)
+
+    def test_retrain_schedule_and_buffer_clearing(self):
+        tree = DecisionTreeClassifier(buffer_size=100)
+        counts, retrains = [], []
+        for start in range(0, 300, 30):
+            tree.partial_fit(self.X[start:start + 30],
+                             self.y[start:start + 30])
+            counts.append(tree.buffer_count_)
+            retrains.append(tree.n_retrains_)
+        self.assertEqual(counts, [30, 60, 90, 0, 30, 60, 90, 0, 30, 60])
+        self.assertEqual(retrains, [0, 0, 0, 1, 1, 1, 1, 2, 2, 2])
+        self.assertEqual(tree.last_train_size_, 120)
+
+    def test_predictions_fixed_between_retrains(self):
+        tree = DecisionTreeClassifier(buffer_size=100)
+        tree.partial_fit(self.X[:100], self.y[:100])
+        before = tree.predict(self.X)
+        tree.partial_fit(self.X[100:150], 1 - self.y[100:150])
+        assert_array_equal(tree.predict(self.X), before)
+
+    def test_large_chunk_triggers_immediate_retrain(self):
+        tree = DecisionTreeClassifier(buffer_size=50)
+        tree.partial_fit(self.X, self.y)
+        self.assertEqual(tree.n_retrains_, 1)
+        self.assertEqual(tree.buffer_count_, 0)
+        self.assertEqual(tree.last_train_size_, 300)
+
+    def test_empty_chunk_is_ignored(self):
+        tree = DecisionTreeClassifier(buffer_size=10)
+        self.assertIs(tree.partial_fit(np.empty((0, 4)), []), tree)
+        self.assertEqual(tree.buffer_count_, 0)
+
+    def test_chunk_feature_mismatch(self):
+        tree = DecisionTreeClassifier(buffer_size=100)
+        tree.partial_fit(self.X[:10], self.y[:10])
+        with self.assertRaises(ValueError):
+            tree.partial_fit(self.X[:10, :3], self.y[:10])
+
+    def test_new_class_in_later_buffer(self):
+        tree = DecisionTreeClassifier(buffer_size=20)
+        tree.partial_fit(self.X[:20], np.zeros(20, int))
+        assert_array_equal(tree.classes_, [0])
+        tree.partial_fit(self.X[20:40], np.arange(20) % 3)
+        assert_array_equal(tree.classes_, [0, 1, 2])
+
+    def test_fit_clears_pending_buffer(self):
+        tree = DecisionTreeClassifier(buffer_size=100)
+        tree.partial_fit(self.X[:40], self.y[:40])
+        tree.fit(self.X, self.y)
+        self.assertEqual(tree.buffer_count_, 0)
+
+    def test_stream_accuracy_reasonable(self):
+        tree = DecisionTreeClassifier(max_depth=5, buffer_size=150)
+        for start in range(0, 300, 25):
+            tree.partial_fit(self.X[start:start + 25],
+                             self.y[start:start + 25])
+        X_test, y_test = _separable_data(200, seed=1)
+        self.assertGreater(tree.score(X_test, y_test), 0.85)
+
+
 if __name__ == "__main__":
     unittest.main()

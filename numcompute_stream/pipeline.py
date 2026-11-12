@@ -483,6 +483,23 @@ class FeatureUnion:
 
         return np.hstack(arrays)
 
+    def partial_fit(self, X, y=None):
+        """Update every branch with one chunk and return this union.
+
+        Branches with partial_fit are updated incrementally; branches
+        without it are fitted on the first chunk only. A failure leaves
+        the union marked as unfitted; branch state is not rolled back.
+        """
+        first = not self._is_fitted
+        self._is_fitted = False
+
+        for _, branch in self.transformers:
+            _partial_fit_step(branch, X, y, first=first)
+
+        self._is_fitted = True
+
+        return self
+
     def fit(self, X, y=None):
         """Fit every branch on the same input and return this union.
 

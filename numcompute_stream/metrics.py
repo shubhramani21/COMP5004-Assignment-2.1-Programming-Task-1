@@ -773,3 +773,60 @@ class StreamingConfusionMatrix(StreamingMetric):
     def _result(self):
         """Return ``(matrix, labels)`` as copies."""
         return self.matrix_.copy(), self.labels_
+
+
+def _score_from_matrix(matrix, labels, metric, average, pos_label,
+                       zero_division):
+    """Compute precision, recall or F1 from a confusion matrix.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray, shape (n_classes, n_classes)
+    labels : numpy.ndarray, shape (n_classes,)
+    metric : {"precision", "recall", "f1"}
+    average : {"binary", "macro", "micro", "weighted"}
+    pos_label : label used when ``average="binary"``
+    zero_division : 0 or 1, value used when a denominator is zero
+
+    Returns
+    -------
+    float
+    """
+    tp = np.diag(matrix).astype(np.float64)
+    fp = matrix.sum(axis=0) - tp  # predicted as the class, but wrong
+    fn = matrix.sum(axis=1) - tp  # the class, but predicted as another
+
+    if metric == "precision":
+        numerator, denominator = tp, tp + fp
+    elif metric == "recall":
+        numerator, denominator = tp, tp + fn
+    else:
+        numerator, denominator = 2 * tp, 2 * tp + fp + fn
+
+    per_class = np.full(tp.shape, float(zero_division))
+    np.divide(numerator, denominator, out=per_class,
+              where=denominator != 0)
+
+    if average == "binary":
+        if labels.size > 2:
+            raise ValueError(
+                "Binary averaging supports at most two classes; "
+                f"saw {labels.size}. Use average='macro' or 'weighted'."
+            )
+        matches = np.flatnonzero(labels == pos_label)
+        if matches.size == 0:
+            # pos_label not seen yet: no true or predicted positives.
+            return float(zero_division)
+        return float(per_class[matches[0]])
+
+    if average == "macro":
+        return float(np.mean(per_class))
+
+    if average == "micro":
+        total = float(np.sum(denominator))
+        if total == 0:
+            return float(zero_division)
+        return float(np.sum(numerator) / total)
+
+    support = matrix.sum(axis=1).astype(np.float64)
+    return float(np.sum(per_class * support) / np.sum(support))

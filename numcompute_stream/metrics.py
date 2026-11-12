@@ -617,3 +617,68 @@ def _validate_stream_labels(y_true, y_pred):
             "(both numeric or both strings)."
         )
     return true, pred
+
+
+class StreamingMetric:
+    """Base class for metrics that are updated chunk by chunk.
+
+    Subclasses implement ``_reset_state``, ``_update`` and ``_result``.
+
+    Attributes
+    ----------
+    n_samples_ : int
+        Number of samples seen since the last ``reset()``.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Forget all data seen so far.
+
+        Returns
+        -------
+        self
+        """
+        self.n_samples_ = 0
+        self._reset_state()
+        return self
+
+    def update(self, y_true, y_pred):
+        """Add one chunk of true and predicted values.
+
+        Parameters
+        ----------
+        y_true : array-like, shape (n_chunk,)
+        y_pred : array-like, shape (n_chunk,)
+
+        Returns
+        -------
+        self
+        """
+        n_added = self._update(y_true, y_pred)
+        self.n_samples_ += n_added
+        return self
+
+    def result(self):
+        """Return the metric over all data seen since the last reset.
+
+        Raises
+        ------
+        RuntimeError
+            If no samples have been seen yet.
+        """
+        if self.n_samples_ == 0:
+            raise RuntimeError(
+                f"{type(self).__name__} has no data; call update() first."
+            )
+        return self._result()
+
+    def _reset_state(self):
+        raise NotImplementedError
+
+    def _update(self, y_true, y_pred):
+        raise NotImplementedError
+
+    def _result(self):
+        raise NotImplementedError

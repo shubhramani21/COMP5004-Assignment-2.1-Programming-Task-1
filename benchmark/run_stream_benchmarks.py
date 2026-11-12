@@ -195,3 +195,40 @@ def bench_confusion(sizes, repeats, chunk_size=100):
                                    repeats=repeats),
                          benchmark(vectorised, repeats=repeats)))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Part B: buffer size
+# ---------------------------------------------------------------------------
+
+def bench_buffer_sizes(buffer_sizes, n_samples, chunk_size, seeds, drift_at):
+    """Stream the same data through trees with different buffer sizes."""
+    rows, curves = [], {}
+    for scenario, drift in (("stationary", None), ("drift", drift_at)):
+        for buffer_size in buffer_sizes:
+            per_seed = []
+            for seed in seeds:
+                X, y = make_stream_data(n_samples, drift_at=drift, seed=seed)
+                trainer = StreamTrainer(
+                    DecisionTreeClassifier(max_depth=6, buffer_size=buffer_size),
+                    track_memory=True)
+                trainer.run(iter_chunks(X, y, chunk_size))
+                retrained = trainer.get_metric("retrained") == 1
+                fit_times = trainer.get_metric("fit_time")
+                per_seed.append({
+                    "accuracy": trainer.summary()["accuracy"],
+                    "n_scored": trainer.summary()["n_scored"],
+                    "n_retrains": int(retrained.sum()),
+                    "mean_retrain_seconds": float(np.mean(fit_times[retrained])),
+                    "total_fit_seconds": float(np.sum(fit_times)),
+                    "peak_model_kb": float(np.nanmax(
+                        trainer.get_metric("model_bytes")) / 1024),
+                })
+                if seed == seeds[0]:
+                    curves[(scenario, buffer_size)] = trainer.get_metric(
+                        "chunk_accuracy")
+            row = {"scenario": scenario, "buffer_size": buffer_size}
+            for key in per_seed[0]:
+                row[key] = float(np.mean([r[key] for r in per_seed]))
+            rows.append(row)
+    return rows, curves

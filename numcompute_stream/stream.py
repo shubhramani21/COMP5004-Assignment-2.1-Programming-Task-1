@@ -173,3 +173,24 @@ class StreamTrainer:
                      StreamingAUC(pos_label=self.auc_pos_label))
         self._pending = None
         return self
+
+    def _stage(self, values):
+        """Collect values for the log entry being built."""
+        if self._pending is None:
+            self._pending = {}
+        self._pending.update(values)
+        return dict(values, **self._cumulative())
+
+    def _cumulative(self):
+        return {
+            "cumulative_accuracy": self._result_or_nan(self._accuracy),
+            "cumulative_f1_macro": self._result_or_nan(self._f1),
+            "rolling_accuracy": self._result_or_nan(self._rolling),
+            "cumulative_auc": self._result_or_nan(self._auc),
+        }
+
+    @staticmethod
+    def _result_or_nan(metric):
+        if metric is None or metric.n_samples_ == 0:
+            return np.nan
+        return metric.result()

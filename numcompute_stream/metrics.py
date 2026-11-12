@@ -866,3 +866,23 @@ class StreamingAccuracy(_ConfusionMatrixMetric):
     def _result(self):
         matrix = self._confusion.matrix_
         return float(np.trace(matrix) / matrix.sum())
+
+
+class _AveragedMetric(_ConfusionMatrixMetric):
+    """Shared options for precision, recall and F1."""
+
+    _metric = None
+
+    def __init__(self, average="binary", pos_label=1, zero_division=0,
+                 labels=None):
+        _validate_metric_options(average, zero_division)
+        self.average = average
+        self.pos_label = pos_label
+        self.zero_division = zero_division
+        super().__init__(labels=labels)
+
+    def _result(self):
+        return _score_from_matrix(
+            self._confusion.matrix_, self._confusion.labels_,
+            self._metric, self.average, self.pos_label, self.zero_division,
+        )

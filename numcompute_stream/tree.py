@@ -674,7 +674,8 @@ class DecisionTreeClassifier:
             Labels from ``classes_``. Ties in leaf probabilities go to the
             class that comes first in ``classes_``.
         """
-        raise NotImplementedError
+        proba = self.predict_proba(X)
+        return self.classes_[np.argmax(proba, axis=1)]
 
     def score(self, X, y):
         """Mean accuracy of ``predict(X)`` against ``y``.

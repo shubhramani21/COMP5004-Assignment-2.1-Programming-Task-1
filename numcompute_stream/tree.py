@@ -147,7 +147,37 @@ def _best_split_feature(x, y_encoded, n_classes, impurity_fn,
     -----
     Time O(n log n + n * n_classes); extra space O(n * n_classes).
     """
-    raise NotImplementedError
+    n_samples = x.shape[0]
+    if n_samples < 2 * min_samples_leaf or n_samples < 2:
+        return None
+
+    x_sorted, y_sorted = _sorted_feature(x, y_encoded)
+
+    one_hot = np.zeros((n_samples, n_classes), dtype=np.float64)
+    one_hot[np.arange(n_samples), y_sorted] = 1.0
+    cumulative = np.cumsum(one_hot, axis=0)
+
+    # Row i of `left` = class counts when the first i + 1 sorted samples go
+    # left. The last row is dropped because it would leave the right empty.
+    left = cumulative[:-1]
+    right = cumulative[-1] - left
+    n_left = np.arange(1, n_samples, dtype=np.float64)
+    n_right = n_samples - n_left
+
+    scores = (n_left * impurity_fn(left)
+              + n_right * impurity_fn(right)) / n_samples
+
+    # A threshold can only sit between two different values, and each
+    # child must satisfy min_samples_leaf.
+    valid = ((x_sorted[:-1] < x_sorted[1:])
+             & (n_left >= min_samples_leaf)
+             & (n_right >= min_samples_leaf))
+    if not np.any(valid):
+        return None
+
+    scores = np.where(valid, scores, np.inf)
+    best = int(np.argmin(scores))  # first minimum -> smallest threshold
+    return float(scores[best]), _midpoint(x_sorted[best], x_sorted[best + 1])
 
 
 def _best_split_feature_loop(x, y_encoded, n_classes, impurity_fn,

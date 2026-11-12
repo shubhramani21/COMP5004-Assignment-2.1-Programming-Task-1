@@ -203,6 +203,59 @@ class Pipeline:
 
         return X
 
+    def partial_fit(self, X, y=None):
+        """Update every step with one chunk of data.
+
+        Parameters
+        ----------
+        X : array-like
+            Chunk accepted by the first step.
+        y : object, optional
+            Target chunk passed unchanged to every update.
+
+        Returns
+        -------
+        Pipeline
+            This pipeline instance.
+
+        Raises
+        ------
+        TypeError
+            If the final step has no callable partial_fit method.
+
+        Notes
+        -----
+        Each intermediate step is updated with the chunk and then
+        transforms it for the next step, so later steps see data
+        transformed with the latest statistics. Intermediate steps
+        without partial_fit are fitted on the first chunk (or by an
+        earlier fit) and only transform afterwards.
+
+        The final step must implement partial_fit. A buffered model
+        such as DecisionTreeClassifier may still be untrained after
+        this call; predict then raises the model's own error.
+        A component failure leaves earlier steps updated; state
+        changes are not rolled back.
+        """
+        last_name, last = self.steps[-1]
+
+        if not _has_method(last, "partial_fit"):
+            raise TypeError(
+                "Pipeline does not support partial_fit because final step "
+                f"{last_name!r} has no partial_fit method."
+            )
+
+        first = not self._is_fitted
+
+        for _, step in self.steps[:-1]:
+            _partial_fit_step(step, X, y, first=first)
+            X = step.transform(X)
+
+        last.partial_fit(X, y)
+        self._is_fitted = True
+
+        return self
+
     def fit(self, X, y=None):
         """Fit intermediate transformations, then fit the final step.
 

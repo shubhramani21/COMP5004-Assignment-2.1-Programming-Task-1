@@ -886,3 +886,20 @@ class _AveragedMetric(_ConfusionMatrixMetric):
             self._confusion.matrix_, self._confusion.labels_,
             self._metric, self.average, self.pos_label, self.zero_division,
         )
+
+
+class StreamingPrecision(_AveragedMetric):
+    """Cumulative precision ``TP / (TP + FP)`` over a stream.
+
+    Parameters
+    ----------
+    average : {"binary", "macro", "micro", "weighted"}, default="binary"
+    pos_label : label, default=1
+        Positive class for ``average="binary"``.
+    zero_division : {0, 1}, default=0
+        Value returned when a denominator is zero.
+    labels : array-like or None
+        Optional fixed label order.
+    """
+
+    _metric = "precision"

@@ -189,3 +189,43 @@ def plot_predictions_vs_ground_truth(y_true, y_pred,
     full_title = f"{title} (accuracy {accuracy:.1%})"
     return _finish(fig, ax, full_title, "Sample", "Class", save_path, show,
                    True)
+
+
+def plot_confusion_matrix(matrix, labels, title="Confusion matrix",
+                          ax=None, save_path=None, show=False,
+                          figsize=(5, 4)):
+    """Draw a confusion matrix (rows: true class, columns: predicted).
+
+    Parameters
+    ----------
+    matrix : array-like, shape (n_classes, n_classes)
+        Counts, e.g. from ``StreamTrainer.confusion_matrix()``.
+    labels : sequence of length n_classes
+
+    Returns
+    -------
+    (matplotlib.figure.Figure, matplotlib.axes.Axes)
+    """
+    matrix = np.asarray(matrix)
+    labels = [str(label) for label in labels]
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("matrix must be square.")
+    if len(labels) != matrix.shape[0]:
+        raise ValueError("labels must have one entry per matrix row.")
+
+    fig, ax = _get_axes(ax, figsize)
+    image = ax.imshow(matrix, cmap="Blues")
+    fig.colorbar(image, ax=ax)
+    ticks = np.arange(len(labels))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(labels)
+    threshold = matrix.max() / 2 if matrix.size else 0
+    for (row, col), count in np.ndenumerate(matrix):
+        ax.text(col, row, str(count), ha="center", va="center",
+                color="white" if count > threshold else "black")
+    fig, ax = _finish(fig, ax, title, "Predicted", "True", save_path, show,
+                      False)
+    ax.grid(False)
+    return fig, ax

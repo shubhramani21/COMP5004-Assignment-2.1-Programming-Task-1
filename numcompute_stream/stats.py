@@ -1,6 +1,17 @@
-"""Descriptive statistics with explicit axis and NaN handling."""
+"""Descriptive statistics with explicit axis and NaN handling.
+
+Streaming tools (no earlier chunks are stored):
+
+- ``StreamingStats``: running count, mean and variance of a 1D stream.
+- ``StreamingQuantile``: P-squared quantile estimates of a 1D stream.
+- ``StreamingHistogram``: histogram counts over all or the last N chunks.
+- ``StreamingSummary``: per-column statistics of 2D chunks through
+  ``update_stats(X_chunk)``.
+"""
 
 import numpy as np
+
+from collections import deque
 
 from .utils import _as_float_array, _validate_axis, _validate_integer
 
@@ -960,3 +971,17 @@ class StreamingStats:
         O(1) time and space.
         """
         return np.float64(np.sqrt(self.variance(ddof=ddof)))
+
+
+def _validate_quantile_levels(q):
+    """Return quantile levels as a 1D float array in [0, 1]."""
+    levels = _as_float_array(q, name="q", finite=True)
+    if levels.ndim > 1:
+        raise ValueError("q must be a scalar or a 1D sequence.")
+    levels = np.atleast_1d(levels)
+    if levels.size == 0:
+        raise ValueError("q must contain at least one level.")
+    if np.any((levels < 0) | (levels > 1)):
+        raise ValueError("q must be between 0 and 1.")
+    return levels
+

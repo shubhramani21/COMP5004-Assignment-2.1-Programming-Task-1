@@ -75,3 +75,22 @@ def estimate_nbytes(obj):
                 if hasattr(current, slot):
                     stack.append(getattr(current, slot))
     return total
+
+
+def _final_estimator(model):
+    """Return the last step of a Pipeline, or the model itself."""
+    steps = getattr(model, "steps", None)
+    if steps:
+        return steps[-1][1]
+    return model
+
+
+def _is_trained(model):
+    """True if the model can predict.
+
+    An unfitted Pipeline, or a final estimator whose ``root_`` is None
+    (a buffered tree that has not retrained yet), cannot.
+    """
+    if getattr(model, "_is_fitted", True) is False:
+        return False
+    return getattr(_final_estimator(model), "root_", True) is not None

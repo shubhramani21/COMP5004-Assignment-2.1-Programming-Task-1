@@ -170,7 +170,7 @@ python -m benchmark.run_stream_benchmarks --quick  # about 10 s
 
 Results are written to a new `benchmark/results/stream_<timestamp>/` folder (`vectorisation.csv`, `buffer_size.csv`, `environment.json` and plots). The recorded run is [`stream_20261112T160811Z`](benchmark/results/stream_20261112T160811Z/) (Python 3.14.8, NumPy 2.5.3, Linux).
 
-**(a) Loop vs vectorised.** Outputs are checked to be identical before timing. Median of 5 runs:
+**(a) Loop vs vectorised.** Outputs are checked to be identical before timing. Median of 5 runs (2 for full tree training):
 
 | Component | n | Loop | Vectorised | Speed-up |
 | --- | ---: | ---: | ---: | ---: |
